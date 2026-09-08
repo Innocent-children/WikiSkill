@@ -1,0 +1,34 @@
+{
+  "source": "https://arxiv.org/html/2608.27454v1#A5",
+  "license": "CC-BY-4.0",
+  "prompts": {
+    "live_math.md": {
+      "sha256": "023f5ed397415c6acbab1038522ac573fb09eb2286d7efd0dadcf49cb4232128",
+      "bytes": 495
+    },
+    "sealqa.md": {
+      "sha256": "12ddb3ad9114a0615577ddbdf8e51bfbf3218a6738f8f87689e4c6fa3c80987d",
+      "bytes": 697
+    },
+    "spreadsheet.md": {
+      "sha256": "65d530cdfaafb48e6e5e205d1ff5fa7a765cb3505344c9188eb3b707185142cc",
+      "bytes": 1623
+    },
+    "officeqa.md": {
+      "sha256": "0270f77c2b9f405a6131e57701da41d5ea0979b88e5d66136678e3bd840bed23",
+      "bytes": 904
+    },
+    "alfworld.md": {
+      "sha256": "ed31e8185102b1a7a3480ca710db5b00f47aec81528b68e9101e184b98d1a85d",
+      "bytes": 786
+    },
+    "maintainer.md": {
+      "sha256": "f736a561a3ce6b0f2f54bc038ccda90c6b6567c02306c9cb20c3c40aac1f8e3c",
+      "bytes": 3967
+    },
+    "proposer.md": {
+      "sha256": "d464898a0b5e1bc1a2d2b5728aef731b8aa897698c71b37c0041bc2aec8c7ef1",
+      "bytes": 2354
+    }
+  }
+}

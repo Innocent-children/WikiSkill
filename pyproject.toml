@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "WikiSkill"
+version = "0.1.0"
+description = "Independent reproduction of the WikiSkill evolution algorithm"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+spreadsheet = ["openpyxl>=3.1"]
+alfworld = ["alfworld>=0.4"]
+benchmarks = ["openpyxl>=3.1", "alfworld>=0.4"]
+
+[project.scripts]
+wikiskill = "wikiskill.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["wikiskill*"]
+
+[tool.setuptools.package-data]
+wikiskill = ["prompts/*.md", "prompts/*.json"]
+"wikiskill.benchmarks" = ["Dockerfile"]
+"wikiskill.benchmarks.vendor" = ["LICENSE-*", "sources.json"]

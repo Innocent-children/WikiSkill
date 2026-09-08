@@ -1,0 +1,4 @@
+{"id": "test-0", "prompt": "Add 40 and 2. Return only the resulting integer in answer tags.", "answer": "42", "files": {}, "metric": "exact", "tolerance": 1e-06}
+{"id": "test-1", "prompt": "Multiply 41 and 2. Return only the resulting integer in answer tags.", "answer": "82", "files": {}, "metric": "exact", "tolerance": 1e-06}
+{"id": "test-2", "prompt": "Subtract the second integer from the first: 42 and 2. Return only the resulting integer in answer tags.", "answer": "40", "files": {}, "metric": "exact", "tolerance": 1e-06}
+{"id": "test-3", "prompt": "Raise the first integer to the power of the second: 43 and 2. Return only the resulting integer in answer tags.", "answer": "1849", "files": {}, "metric": "exact", "tolerance": 1e-06}

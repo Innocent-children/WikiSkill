@@ -1,0 +1,9 @@
+{
+  "project": "/Users/innocent-children/PycharmProjects/wikiskill",
+  "tests": 51,
+  "test_result": "passed",
+  "real_docker_and_libreoffice": true,
+  "real_alfworld": true,
+  "real_model_benchmark_scores_measured": false,
+  "wheel_sha256": "38de4c28e4631dd1d5b6676ba8a52d1403f2d88b867e27aa64366289e13988a4"
+}
