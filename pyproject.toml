@@ -17,11 +17,13 @@ benchmarks = ["openpyxl>=3.1", "alfworld>=0.4"]
 
 [project.scripts]
 wikiskill = "wikiskill.cli:main"
+wikiskill-codex = "wikiskill.live.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["wikiskill*"]
 
 [tool.setuptools.package-data]
 wikiskill = ["prompts/*.md", "prompts/*.json"]
+"wikiskill.live" = ["skill/SKILL.md"]
 "wikiskill.benchmarks" = ["Dockerfile"]
 "wikiskill.benchmarks.vendor" = ["LICENSE-*", "sources.json"]
