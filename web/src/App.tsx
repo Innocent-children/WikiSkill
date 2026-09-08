@@ -24,6 +24,7 @@ import { Jobs, JobDetail } from "./pages/Jobs";
 import { Knowledge } from "./pages/Knowledge";
 import { Skills } from "./pages/Skills";
 import { System } from "./pages/System";
+import { Manage } from "./pages/Manage";
 
 export function App() {
   const live = useLiveSnapshot();
@@ -193,6 +194,13 @@ export function App() {
             !live.error && <Loading />
           ) : route.view === "system" ? (
             <System snapshot={snapshot} now={now} />
+          ) : route.view === "manage" ? (
+            <Manage
+              snapshot={snapshot}
+              revision={live.revision}
+              refresh={live.refresh}
+              project={route.project}
+            />
           ) : route.project && !selectedProject ? (
             <Empty title="项目不存在">
               <a href={href("overview")}>返回全部项目</a>
@@ -207,8 +215,8 @@ export function App() {
                 }
               >
                 <p>
-                  在 Codex 业务任务中使用 <code>$wikiskill</code>
-                  ，采集的项目经验和处理结果会自动出现在这里。
+                  连接 WikiSkill MCP 后正常使用
+                  Codex，新增轨迹会自动出现在知识工作台。
                 </p>
                 {!snapshot.initialized && (
                   <pre className="code-block">wikiskill-codex init</pre>
@@ -249,7 +257,7 @@ export function App() {
             />
           )}
           <footer className="page-footer">
-            <span>WikiSkill · 只读查看</span>
+            <span>WikiSkill · 本地经验管理</span>
             {snapshot && (
               <span>最近同步 {time(snapshot.captured_at, true)}</span>
             )}

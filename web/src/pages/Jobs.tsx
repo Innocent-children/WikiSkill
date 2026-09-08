@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowDownToLine, ArrowRight, CircleAlert, Check } from "lucide-react";
-import { useResource } from "../api";
+import { mutate, useResource } from "../api";
+import { useAction } from "./Manage";
 import { href, navigate, type Route } from "../routing";
 import {
   contentNames,
@@ -113,9 +114,11 @@ export function JobDetail({
   const [tab, setTab] = useState("overview");
   const [inputOffset, setInputOffset] = useState(0);
   const [eventOffset, setEventOffset] = useState(0);
+  const [localRevision, setLocalRevision] = useState(0);
+  const action = useAction(() => setLocalRevision((n) => n + 1));
   const job = useResource<JobData>(
     `/api/jobs/${encodeURIComponent(id)}`,
-    revision,
+    revision + localRevision,
   );
   const inputs = useResource<Page<Input>>(
     tab === "inputs"
@@ -133,6 +136,33 @@ export function JobDetail({
   return (
     <>
       <Back to={href("jobs", { project: data.project })}>全部批次</Back>
+      {data.state === "failed" && (
+        <div className="manage-actions">
+          <button
+            disabled={action.busy}
+            onClick={() =>
+              void action.run(
+                () => mutate(`/api/jobs/${id}/retry`, { regenerate: false }),
+                "已按固定输入重试",
+              )
+            }
+          >
+            重试失败批次
+          </button>
+          <button
+            disabled={action.busy}
+            onClick={() =>
+              void action.run(
+                () => mutate(`/api/jobs/${id}/retry`, { regenerate: true }),
+                "已请求重新生成",
+              )
+            }
+          >
+            使用当前设置重新生成
+          </button>
+        </div>
+      )}
+      {action.status}
       <div className="detail-heading">
         <div>
           <div className="eyebrow">

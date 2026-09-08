@@ -14,10 +14,6 @@ TEXT = {"type": "string"}
 PROJECT = {"project": {"type": "string", "description": "Absolute project directory; Git worktrees share accumulated knowledge."}}
 TOOLS = {
     "wikiskill_context": ("Load the managed Skill contents for the current business task.", schema(PROJECT, ["project"])),
-    "wikiskill_collect": ("Append explicit business observations, deduplicate substantive content, and wake the threshold worker.",
-        schema({**PROJECT, "source_id": TEXT, "observations": {"type": "array", "items": schema(
-            {name: TEXT for name in ("problem", "action", "outcome", "lesson")}, ["problem", "action", "outcome", "lesson"])},
-            "metadata": {"type": "object"}}, ["project", "source_id", "observations"])),
     "wikiskill_wiki": ("Write named knowledge pages; metadata-only or identical-body updates do not trigger evolution.",
         schema({**PROJECT, "pages": {"type": "array", "items": schema({"name": TEXT, "body": TEXT}, ["name", "body"])},
                 "metadata": {"type": "object"}}, ["project", "pages"])),
@@ -26,8 +22,6 @@ TOOLS = {
         schema({**PROJECT, "layer": {"enum": ["raw", "wiki", "reports"], "type": "string"}, "key": TEXT,
                 "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1, "maximum": 100}},
                ["project", "layer"])),
-    "wikiskill_enroll": ("Associate an explicitly allowlisted external Skill with this project; requires the management switch.",
-        schema({**PROJECT, "directory": TEXT}, ["project", "directory"])),
     "wikiskill_history": ("Read Skill version diffs, or full before/after bundles including binary assets when version_id is supplied.",
         schema({"skill_id": TEXT, "version_id": TEXT}, ["skill_id"])),
     "wikiskill_rollback": ("Restore a selected full Skill directory version and retain the replaced directory as another version.",
@@ -67,13 +61,8 @@ def call(runtime: Runtime, name: str, arguments: dict):
     args = dict(arguments)
     if name == "wikiskill_context":
         return runtime.context(**args)
-    if name == "wikiskill_collect":
-        result = runtime.collect(**args)
-    elif name == "wikiskill_wiki":
+    if name == "wikiskill_wiki":
         result = runtime.put_wiki(**args)
-    elif name == "wikiskill_enroll":
-        project = runtime.store.project(args.pop("project"))
-        result = runtime.store.enroll(project, **args)
     elif name == "wikiskill_retry":
         result = runtime.retry(**args)
     elif name == "wikiskill_rollback":
@@ -85,6 +74,9 @@ def call(runtime: Runtime, name: str, arguments: dict):
         return runtime.store.status(key)
     else:
         project = runtime.store.project(args.pop("project"))
+        if args.get("layer") == "raw":
+            from .traces import TraceView
+            return TraceView(runtime.config.root).records(project, offset=args.get("offset", 0), limit=args.get("limit", 50), record_id=args.get("key"))
         return runtime.store.query(project, **args)
     try:
         result.update(runtime.wake())

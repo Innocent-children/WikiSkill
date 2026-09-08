@@ -8,6 +8,7 @@ import time
 from collections import deque
 
 from .config import Config
+from .generation import generation_prompt
 
 
 def object_schema(properties: dict) -> dict:
@@ -139,6 +140,9 @@ class CodexSession:
         self.thread_id = thread.get("id")
         if not isinstance(self.thread_id, str) or not self.thread_id:
             raise RuntimeError("Codex did not return a persistent thread id")
+        from .store import Store
+        with Store(self.config).transaction() as db:
+            db.execute("INSERT OR IGNORE INTO generated_sessions VALUES(?)", (self.thread_id,))
         return self.thread_id
 
     def resume(self, thread_id: str):
@@ -172,17 +176,7 @@ class CodexSession:
                 return list(texts.values())[-1]
 
     def generate(self, stage: str, context: dict) -> dict:
-        instruction = (
-            "Consolidate the new observations into named reusable Wiki pages. Return only pages with substantive knowledge changes. "
-            "Use existing names when updating a page; return its complete body. Keep timestamps, logs and indexes out of page bodies. "
-            "Use lowercase hyphenated page names. Return pages=[] if no reusable knowledge was added."
-            if stage == "raw" else
-            "Improve this one Skill from the supplied new Wiki content and full current Skill. Preserve its purpose and scope. "
-            "Return the complete SKILL.md with YAML name and description, or skill_md=null for no substantive change. "
-            "Keep the current name, or use suggested_name for a new Skill. Existing supporting assets stay unchanged. "
-            "Do not introduce references to resources absent from the supplied inventory. There is no candidate effect evaluation."
-        )
-        output = self.turn(instruction + "\n\n" + json.dumps(context, ensure_ascii=False),
+        output = self.turn(generation_prompt(stage, context),
                            WIKI_SCHEMA if stage == "raw" else SKILL_SCHEMA)
         try:
             return json.loads(output)

@@ -55,6 +55,18 @@ class FakeSession:
         return report["summary"]
 
 
+def seed_record(runtime, project, event="one"):
+    import time
+    with runtime.store.transaction() as db:
+        db.execute("INSERT OR IGNORE INTO trace_sources(id,identity,path,fingerprint,prefix_length) VALUES(1,'fixture','fixture','',0)")
+        db.execute("INSERT OR IGNORE INTO trace_turns(source,turn_key,project,ended) VALUES(1,?,?,1)", (event,project))
+        turn = db.execute("SELECT id FROM trace_turns WHERE source=1 AND turn_key=?", (event,)).fetchone()[0]
+        db.execute("INSERT OR IGNORE INTO trace_records(source,offset,original,project,turn_id,event_type,created) VALUES(1,?,?,?,?,?,?)",
+                   (turn, json.dumps({"type":"response_item","payload":{"event":event,**OBSERVATION}}).encode()+b"\n", project,turn,"response_item",time.time()))
+        runtime.store.event(db, "capture.updated", project=project)
+    return {"raw_id": str(turn)}
+
+
 class LiveRuntimeTests(unittest.TestCase):
     def setUp(self):
         for name in ("starts", "generations", "reports"):
@@ -65,14 +77,14 @@ class LiveRuntimeTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.project = self.root / "project"
         self.project.mkdir()
-        self.runtime = Runtime(Config(self.root / "home", raw_threshold=1, wiki_threshold=1, auto_start=False), FakeSession)
+        self.runtime = Runtime(Config(self.root / "home", raw_threshold=1, wiki_threshold=1, auto_start=False, raw_auto=True, wiki_auto=True), FakeSession)
         self.key = self.runtime.store.project(str(self.project))
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def collect(self, event="one"):
-        return self.runtime.collect(str(self.project), event, [OBSERVATION])
+        return seed_record(self.runtime, self.key, event)
 
     def test_two_stages_create_separate_threads_report_and_consume_once(self):
         self.collect()
@@ -84,7 +96,7 @@ class LiveRuntimeTests(unittest.TestCase):
         self.assertEqual(status["raw_pending"], 0)
         self.assertEqual(status["skills"][0]["wiki_pending"], 0)
         self.assertIn("Read the project", self.runtime.context(str(self.project))["skills"][0]["skill_md"])
-        self.collect("duplicate-content")
+        self.collect("one")
         self.assertEqual(self.runtime.drain(), 0)
         for report_file in (self.runtime.config.root / "reports").glob("*.json"):
             self.assertIn("thread_id", json.loads(report_file.read_text()))
@@ -163,9 +175,10 @@ for line in sys.stdin:
   print(json.dumps({"method":"turn/completed","params":{"threadId":thread_id,"turn":{"id":turn_id,"status":"completed"}}}),flush=True)
 ''')
         runtime = Runtime(Config(self.root / "worker-home", raw_threshold=1, wiki_threshold=1,
-                                 poll_seconds=1, timeout_seconds=5, codex_command=[sys.executable, str(program)]))
-        runtime.collect(str(self.project), "worker", [OBSERVATION])
-        process_id = runtime.wake()["pid"]
+                                 poll_seconds=1, timeout_seconds=5, raw_auto=True, wiki_auto=True, codex_home=str(self.root / "empty-codex"), codex_command=[sys.executable, str(program)]))
+        seed_record(runtime, runtime.store.project(str(self.project)), "worker")
+        started = runtime.wake()
+        process_id = started["pid"]
         try:
             deadline = time.monotonic() + 15
             jobs = []
@@ -179,6 +192,7 @@ for line in sys.stdin:
         finally:
             try:
                 os.killpg(process_id, signal.SIGTERM)
+                os.killpg(started["collector_pid"], signal.SIGTERM)
             except ProcessLookupError:
                 pass
             try:
@@ -198,7 +212,7 @@ for line in sys.stdin:
         self.collect()
         def collect_extra():
             FakeSession.during_generate = None
-            self.runtime.collect(str(self.project), "new", [{**OBSERVATION, "lesson": "Use settings.xml"}])
+            self.collect("new")
         FakeSession.during_generate = collect_extra
         self.runtime.schedule()
         job = self.runtime.store.rows("SELECT id FROM jobs")[0]

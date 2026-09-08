@@ -1,6 +1,26 @@
 import { useEffect, useState } from "react";
 import type { Snapshot } from "./types";
 
+export async function mutate<T = Record<string, unknown>>(
+  path: string,
+  body: unknown = {},
+  method = "POST",
+): Promise<T> {
+  const response = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const value = await response.json();
+  if (!response.ok)
+    throw new Error(
+      typeof value.detail === "string"
+        ? value.detail
+        : `操作失败（${response.status}）`,
+    );
+  return value as T;
+}
+
 export async function request<T>(
   path: string,
   signal?: AbortSignal,

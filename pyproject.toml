@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "WikiSkill"
 version = "0.1.0"
-description = "Independent reproduction of the WikiSkill evolution algorithm"
+description = "Local Codex transcript, knowledge and Skill management with a WebUI"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -14,23 +14,15 @@ dependencies = [
     "uvicorn>=0.30,<1",
 ]
 
-[project.optional-dependencies]
-spreadsheet = ["openpyxl>=3.1"]
-alfworld = ["alfworld>=0.4"]
-benchmarks = ["openpyxl>=3.1", "alfworld>=0.4"]
-
 [project.scripts]
-wikiskill = "wikiskill.cli:main"
+wikiskill = "wikiskill.live.cli:main"
 wikiskill-codex = "wikiskill.live.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["wikiskill*"]
 
 [tool.setuptools.package-data]
-wikiskill = ["prompts/*.md", "prompts/*.json"]
 "wikiskill.live" = ["skill/SKILL.md", "web_assets/*", "web_assets/assets/*"]
-"wikiskill.benchmarks" = ["Dockerfile"]
-"wikiskill.benchmarks.vendor" = ["LICENSE-*", "sources.json"]
 
 [dependency-groups]
 dev = [

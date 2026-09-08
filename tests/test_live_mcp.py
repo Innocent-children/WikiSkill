@@ -19,8 +19,8 @@ class LiveMcpTests(unittest.TestCase):
                 {"id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "clientInfo": {"name": "test", "version": "1"}, "capabilities": {}}},
                 {"method": "notifications/initialized"},
                 {"id": 2, "method": "tools/list"},
-                {"id": 3, "method": "tools/call", "params": {"name": "wikiskill_collect", "arguments": {"project": directory, "source_id": "test", "observations": [{"problem": "failure", "action": "fix", "outcome": "passed", "lesson": "lesson"}]}}},
-                {"id": 4, "method": "tools/call", "params": {"name": "wikiskill_query", "arguments": {"project": directory, "layer": "raw"}}},
+                {"id": 3, "method": "tools/call", "params": {"name": "wikiskill_wiki", "arguments": {"project": directory, "pages": [{"name": "build", "body": "Use the project JDK"}]}}},
+                {"id": 4, "method": "tools/call", "params": {"name": "wikiskill_query", "arguments": {"project": directory, "layer": "wiki"}}},
                 {"id": 5, "method": "tools/call", "params": {"name": "wikiskill_collect", "arguments": {"project": directory, "source_id": "test2", "observations": [], "unknown": True}}},
             ]
             process = subprocess.run([sys.executable, "-m", "wikiskill.live.cli", "--root", str(root / "home"), "mcp"],
@@ -29,11 +29,11 @@ class LiveMcpTests(unittest.TestCase):
             self.assertEqual(process.returncode, 0, process.stderr)
             responses = [json.loads(line) for line in process.stdout.splitlines()]
             self.assertEqual(len(responses), 5)
-            self.assertTrue({"wikiskill_collect", "wikiskill_context", "wikiskill_rollback"} <=
+            self.assertTrue({"wikiskill_wiki", "wikiskill_context", "wikiskill_rollback"} <=
                             {tool["name"] for tool in responses[1]["result"]["tools"]})
             self.assertFalse(responses[2]["result"]["isError"])
             body = json.loads(responses[3]["result"]["content"][0]["text"])
-            self.assertEqual(body["items"][0]["payload"]["observations"][0]["outcome"], "passed")
+            self.assertEqual(body["items"][0]["body"], "Use the project JDK")
             self.assertTrue(responses[4]["result"]["isError"])
 
     def test_skill_installer_preserves_unrelated_content(self):

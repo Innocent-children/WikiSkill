@@ -1,4 +1,0 @@
-{"id": "validation-0", "prompt": "Add 20 and 2. Return only the resulting integer in answer tags.", "answer": "22", "files": {}, "metric": "exact", "tolerance": 1e-06}
-{"id": "validation-1", "prompt": "Multiply 21 and 2. Return only the resulting integer in answer tags.", "answer": "42", "files": {}, "metric": "exact", "tolerance": 1e-06}
-{"id": "validation-2", "prompt": "Subtract the second integer from the first: 22 and 2. Return only the resulting integer in answer tags.", "answer": "20", "files": {}, "metric": "exact", "tolerance": 1e-06}
-{"id": "validation-3", "prompt": "Raise the first integer to the power of the second: 23 and 2. Return only the resulting integer in answer tags.", "answer": "529", "files": {}, "metric": "exact", "tolerance": 1e-06}

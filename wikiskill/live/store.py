@@ -43,6 +43,22 @@ CREATE INDEX IF NOT EXISTS jobs_project_created ON jobs(project,created);
 CREATE INDEX IF NOT EXISTS observations_pending ON observations(project,consumed_by);
 CREATE INDEX IF NOT EXISTS raw_project_created ON raw(project,created);
 CREATE INDEX IF NOT EXISTS versions_skill_created ON versions(skill,created);
+CREATE TABLE IF NOT EXISTS capture_state(id INTEGER PRIMARY KEY CHECK(id=1), enabled REAL NOT NULL,
+ history_requested INTEGER NOT NULL DEFAULT 0, heartbeat REAL, error TEXT);
+CREATE TABLE IF NOT EXISTS trace_sources(id INTEGER PRIMARY KEY, identity TEXT NOT NULL, path TEXT NOT NULL,
+ session TEXT, project TEXT, cwd TEXT, position INTEGER NOT NULL DEFAULT 0,
+ start_position INTEGER NOT NULL DEFAULT 0, fingerprint TEXT NOT NULL, prefix_length INTEGER NOT NULL,
+ active_turn TEXT, generation INTEGER NOT NULL DEFAULT 0, UNIQUE(identity,generation));
+CREATE TABLE IF NOT EXISTS trace_turns(id INTEGER PRIMARY KEY, source INTEGER NOT NULL, turn_key TEXT NOT NULL,
+ project TEXT, session TEXT, ended INTEGER NOT NULL DEFAULT 0, UNIQUE(source,turn_key));
+CREATE TABLE IF NOT EXISTS trace_records(id INTEGER PRIMARY KEY, source INTEGER NOT NULL, offset INTEGER NOT NULL,
+ original BLOB NOT NULL, project TEXT, session TEXT, turn_id INTEGER, event_type TEXT,
+ parse_error TEXT, consumed_by TEXT, created REAL NOT NULL, UNIQUE(source,offset));
+CREATE INDEX IF NOT EXISTS trace_records_pending ON trace_records(project,consumed_by,id);
+CREATE TABLE IF NOT EXISTS generated_sessions(id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS job_execution(job TEXT PRIMARY KEY, settings TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS installations(id TEXT PRIMARY KEY, skill TEXT NOT NULL, target TEXT NOT NULL,
+ before_bundle TEXT NOT NULL, after_bundle TEXT NOT NULL, state TEXT NOT NULL, created REAL NOT NULL);
 """
 
 
@@ -59,6 +75,16 @@ class Store:
         self.path = config.root / "state.sqlite3"
         with self.connect() as db:
             db.executescript(SCHEMA)
+            # Wiki history records each actual edit, including a return to an earlier body.
+            sql = db.execute("SELECT sql FROM sqlite_master WHERE name='wiki_changes'").fetchone()[0]
+            if "UNIQUE(project,name,digest)" in sql:
+                db.executescript("""BEGIN IMMEDIATE;
+                ALTER TABLE wiki_changes RENAME TO wiki_changes_previous;
+                CREATE TABLE wiki_changes(id INTEGER PRIMARY KEY, project TEXT NOT NULL, name TEXT NOT NULL,
+                 digest TEXT NOT NULL, body TEXT NOT NULL, job_id TEXT NOT NULL);
+                INSERT INTO wiki_changes SELECT * FROM wiki_changes_previous;
+                DROP TABLE wiki_changes_previous;
+                COMMIT;""")
 
     @contextmanager
     def connect(self, timeout: float = 30):
@@ -108,51 +134,6 @@ class Store:
                 self.event(db, "project.registered", project=key)
         return key
 
-    def enroll(self, project: str, directory: str) -> dict:
-        path = Path(directory).expanduser().resolve(strict=True)
-        if not path.is_dir() or not (path / "SKILL.md").is_file():
-            raise ValueError("External skill directory must contain SKILL.md")
-        if not self.config.permits(path, False):
-            raise ValueError("Enable manage_external and list this directory in external_skills first")
-        key = digest(str(path))[:24]
-        with self.transaction() as db:
-            db.execute("INSERT OR IGNORE INTO skills VALUES(?,?,0)", (key, str(path)))
-            db.execute("INSERT OR IGNORE INTO project_skills VALUES(?,?)", (project, key))
-            self.event(db, "skill.enrolled", project=project, skill=key)
-        return {"skill_id": key, "path": str(path)}
-
-    def collect(self, project: str, source_id: str, observations: list[dict], metadata: dict) -> dict:
-        if not isinstance(source_id, str) or not source_id.strip():
-            raise ValueError("source_id must be a stable nonempty event identifier")
-        if not isinstance(observations, list) or not isinstance(metadata, dict):
-            raise ValueError("observations must be a list and metadata an object")
-        bodies = []
-        for item in observations:
-            if not isinstance(item, dict) or set(item) != {"problem", "action", "outcome", "lesson"}:
-                raise ValueError("Each observation requires problem, action, outcome and lesson")
-            if any(not isinstance(value, str) for value in item.values()):
-                raise ValueError("Observation fields must be text")
-            body = {key: normalized(value) for key, value in item.items()}
-            if not body["problem"] or not body["outcome"]:
-                raise ValueError("An observation requires an actual problem and outcome")
-            bodies.append(body)
-        payload = {"observations": observations, "metadata": metadata}
-        with self.transaction() as db:
-            old = db.execute("SELECT * FROM raw WHERE project=? AND source_id=?", (project, source_id)).fetchone()
-            if old:
-                if json.loads(old["payload"])["observations"] != observations:
-                    raise ValueError("source_id was already used with different observations")
-                return {"raw_id": old["id"], "new_observations": 0, "duplicate": True}
-            key = uuid.uuid4().hex
-            db.execute("INSERT INTO raw VALUES(?,?,?,?,?)", (key, project, source_id, dumps(payload), time.time()))
-            count = 0
-            for body in bodies:
-                count += db.execute("INSERT OR IGNORE INTO observations(project,raw_id,digest,body) VALUES(?,?,?,?)",
-                                    (project, key, digest(body), dumps(body))).rowcount
-            self.event(db, "raw.collected", project=project, raw_id=key, new_observations=count,
-                       submitted_observations=len(observations))
-        return {"raw_id": key, "new_observations": count, "duplicate": False}
-
     def job(self, key: str) -> dict:
         values = self.rows("SELECT * FROM jobs WHERE id=?", (key,))
         if not values:
@@ -184,7 +165,7 @@ class Store:
                              (project,) if project else ())
         for item in projects:
             key = item["id"]
-            item["raw_pending"] = self.rows("SELECT count(*) n FROM observations WHERE project=? AND consumed_by IS NULL", (key,))[0]["n"]
+            item["raw_pending"] = self.rows("SELECT count(*) n FROM trace_records WHERE project=? AND consumed_by IS NULL", (key,))[0]["n"]
             item["wiki_pages"] = self.rows("SELECT count(*) n FROM wiki WHERE project=?", (key,))[0]["n"]
             item["skills"] = self.skills(key)
             for skill in item["skills"]:

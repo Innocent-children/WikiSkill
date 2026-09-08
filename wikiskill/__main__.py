@@ -1,3 +1,3 @@
-from .cli import main
+from .live.cli import main
 
 raise SystemExit(main())

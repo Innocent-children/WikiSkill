@@ -1,8 +1,0 @@
-{
-  "sealqa_grader.md": {
-    "source": "https://arxiv.org/html/2506.01062v3",
-    "section": "Appendix C",
-    "sha256": "41c7e30f0ff7e29eb8ebbc476bcc13dc29010bcfd9ceb3d85af10c38925de543",
-    "extraction": "embedded plain-text GRADER_TEMPLATE literal, followed by its original strip()"
-  }
-}

@@ -43,8 +43,16 @@ export type Worker = {
 export type Config = {
   raw_threshold: number;
   wiki_threshold: number;
-  manage_external: boolean;
-  external_skills: string[];
+  raw_auto: boolean;
+  wiki_auto: boolean;
+  codex_home: string;
+  install_directory: string;
+  executor: string;
+  api_provider: string;
+  api_url: string;
+  api_model: string;
+  api_key_configured: boolean;
+  input_budget: number;
   model: string | null;
   timeout_seconds: number;
   poll_seconds: number;
@@ -148,6 +156,7 @@ export type Wiki = {
   revisions: number;
 };
 export type WikiChange = {
+  diff?: string;
   id: number;
   body: string;
   digest: string;

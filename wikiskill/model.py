@@ -82,8 +82,9 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class ChatCompletionsModel:
-    def __init__(self, config: ModelConfig):
+    def __init__(self, config: ModelConfig, api_key: str | None = None):
         self.config = config
+        self.api_key = api_key
         self.opener = urllib.request.build_opener(_NoRedirect())
 
     @property
@@ -99,11 +100,12 @@ class ChatCompletionsModel:
         if tools:
             payload.update(tools=tools, tool_choice="auto")
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
-        if config.api_key_env:
-            key = os.environ.get(config.api_key_env)
-            if not key:
+        if self.api_key is not None or config.api_key_env:
+            key = self.api_key if self.api_key is not None else os.environ.get(config.api_key_env)
+            if not key and self.api_key is None:
                 raise ModelError(f"Set the environment variable {config.api_key_env}, or use an empty api_key_env for an unauthenticated server")
-            headers["Authorization"] = f"Bearer {key}"
+            if key:
+                headers["Authorization"] = f"Bearer {key}"
         request = urllib.request.Request(config.base_url.rstrip("/") + "/chat/completions",
                                          data=json.dumps(payload, ensure_ascii=False).encode(), headers=headers)
         for attempt in range(config.retries + 1):
@@ -168,8 +170,9 @@ class ChatCompletionsModel:
 class GeminiModel:
     """Native generateContent adapter preserving function-call thought signatures."""
 
-    def __init__(self, config: ModelConfig):
+    def __init__(self, config: ModelConfig, api_key: str | None = None):
         self.config = config
+        self.api_key = api_key
 
     @property
     def identity(self) -> dict:
@@ -238,11 +241,12 @@ class GeminiModel:
                  "parametersJsonSchema": tool["function"]["parameters"]} for tool in tools]}]
             payload["toolConfig"] = {"functionCallingConfig": {"mode": "AUTO"}}
         headers = {}
-        if config.api_key_env:
-            key = os.environ.get(config.api_key_env)
-            if not key:
+        if self.api_key is not None or config.api_key_env:
+            key = self.api_key if self.api_key is not None else os.environ.get(config.api_key_env)
+            if not key and self.api_key is None:
                 raise ModelError(f"Set the environment variable {config.api_key_env}")
-            headers["x-goog-api-key"] = key
+            if key:
+                headers["x-goog-api-key"] = key
         from urllib.parse import quote
         name = config.model.removeprefix("models/")
         url = config.base_url.rstrip("/") + f"/models/{quote(name, safe='')}:generateContent"
@@ -280,5 +284,5 @@ class GeminiModel:
             raise ModelError("Gemini returned an invalid generateContent response") from exc
 
 
-def create_model(config: ModelConfig) -> ChatModel:
-    return GeminiModel(config) if config.provider == "gemini" else ChatCompletionsModel(config)
+def create_model(config: ModelConfig, api_key: str | None = None) -> ChatModel:
+    return GeminiModel(config, api_key) if config.provider == "gemini" else ChatCompletionsModel(config, api_key)

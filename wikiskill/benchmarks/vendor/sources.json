@@ -1,9 +1,0 @@
-{
-  "officeqa_reward.py": {
-    "repository": "https://github.com/databricks/officeqa",
-    "commit": "7b9a3c154ef9fb40215bb67934afc43e6799de16",
-    "path": "reward.py",
-    "license": "Apache-2.0",
-    "sha256": "9f9d9039a7d7fb8be2e84b9e59ca15a5a9aa875f04978cbb92df837c34690358"
-  }
-}

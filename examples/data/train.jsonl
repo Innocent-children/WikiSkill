@@ -1,8 +1,0 @@
-{"id": "train-0", "prompt": "Add 3 and 2. Return only the resulting integer in answer tags.", "answer": "5", "files": {}, "metric": "exact", "tolerance": 1e-06}
-{"id": "train-1", "prompt": "Multiply 4 and 2. Return only the resulting integer in answer tags.", "answer": "8", "files": {}, "metric": "exact", "tolerance": 1e-06}
-{"id": "train-2", "prompt": "Subtract the second integer from the first: 5 and 2. Return only the resulting integer in answer tags.", "answer": "3", "files": {}, "metric": "exact", "tolerance": 1e-06}
-{"id": "train-3", "prompt": "Raise the first integer to the power of the second: 6 and 2. Return only the resulting integer in answer tags.", "answer": "36", "files": {}, "metric": "exact", "tolerance": 1e-06}
-{"id": "train-4", "prompt": "Add 7 and 2. Return only the resulting integer in answer tags.", "answer": "9", "files": {}, "metric": "exact", "tolerance": 1e-06}
-{"id": "train-5", "prompt": "Multiply 8 and 2. Return only the resulting integer in answer tags.", "answer": "16", "files": {}, "metric": "exact", "tolerance": 1e-06}
-{"id": "train-6", "prompt": "Subtract the second integer from the first: 9 and 2. Return only the resulting integer in answer tags.", "answer": "7", "files": {}, "metric": "exact", "tolerance": 1e-06}
-{"id": "train-7", "prompt": "Raise the first integer to the power of the second: 10 and 2. Return only the resulting integer in answer tags.", "answer": "100", "files": {}, "metric": "exact", "tolerance": 1e-06}

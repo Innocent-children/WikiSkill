@@ -1,6 +1,7 @@
+import { useAction } from "./Manage";
 import { useState } from "react";
 import { ArrowRight, BookOpen, FileText } from "lucide-react";
-import { useResource } from "../api";
+import { mutate, useResource } from "../api";
 import { href, navigate, type Route } from "../routing";
 import { query, short, time } from "../presentation";
 import {
@@ -69,7 +70,7 @@ export function KnowledgeList({
     <>
       <DocumentTabs
         values={[
-          { id: "raw", label: "原始提交 Raw" },
+          { id: "raw", label: "旧经验摘要" },
           { id: "wiki", label: "知识页面 Wiki" },
         ]}
         active={layer}
@@ -93,10 +94,10 @@ export function KnowledgeList({
               >
                 <FileText size={21} />
                 <div>
-                  <h3>{(item as Raw).title || "原始提交"}</h3>
+                  <h3>{(item as Raw).title || "旧经验摘要"}</h3>
                   <p className="muted">
                     {(item as Raw).submitted} 条提交 · 新增{" "}
-                    {(item as Raw).added} 条不同观察
+                    {(item as Raw).added} 条旧摘要条目
                   </p>
                   <code>{(item as Raw).source_id}</code>
                 </div>
@@ -131,7 +132,9 @@ export function KnowledgeList({
         <Loading />
       ) : (
         <div className="panel">
-          <Empty title={layer === "raw" ? "还没有原始提交" : "还没有知识页面"}>
+          <Empty
+            title={layer === "raw" ? "还没有旧经验摘要" : "还没有知识页面"}
+          >
             {layer === "raw"
               ? "在 Codex 任务中提交可复用经验后，这里会保留原始内容。"
               : "原始经验达到阈值并处理完成后，可以在这里查看整理结果。"}
@@ -170,7 +173,7 @@ export function RawPage({
   );
   return (
     <>
-      <Back to={href("knowledge", { project, layer: "raw" })}>原始提交</Back>
+      <Back to={href("knowledge", { project, layer: "raw" })}>旧经验摘要</Back>
       <ErrorMessage error={raw.error} />
       {raw.data ? (
         <>
@@ -244,7 +247,7 @@ export function RawPage({
             ))}
           </div>
           <details className="disclosure panel">
-            <summary>原始提交与元数据</summary>
+            <summary>旧经验摘要与元数据</summary>
             <Json value={raw.data.payload} />
           </details>
         </>
@@ -265,14 +268,17 @@ export function WikiPage({
   revision: number;
 }) {
   const [offset, setOffset] = useState(0);
+  const [localRevision, setLocalRevision] = useState(0);
+  const action = useAction(() => setLocalRevision((n) => n + 1));
   const wiki = useResource<WikiDetail>(
     `/api/projects/${encodeURIComponent(project)}/wiki/${encodeURIComponent(name)}${query({ offset })}`,
-    revision,
+    revision + localRevision,
   );
   return (
     <>
       <Back to={href("knowledge", { project, layer: "wiki" })}>知识页面</Back>
       <ErrorMessage error={wiki.error} />
+      {action.status}
       {wiki.data ? (
         <>
           <div className="detail-heading">
@@ -327,7 +333,23 @@ export function WikiPage({
                     ))}
                   </div>
                   <details className="disclosure">
-                    <summary>查看该版本正文</summary>
+                    <summary>查看该版本正文与差异</summary>
+                    <pre className="code-block">{change.diff}</pre>
+                    <button
+                      disabled={action.busy}
+                      onClick={() =>
+                        void action.run(
+                          () =>
+                            mutate(`/api/projects/${project}/wiki/rollback`, {
+                              change_id: change.id,
+                              expected: wiki.data!.digest,
+                            }),
+                          "已回退为新正文版本",
+                        )
+                      }
+                    >
+                      回退到此正文
+                    </button>
                     <Markdown text={change.body} />
                   </details>
                 </article>

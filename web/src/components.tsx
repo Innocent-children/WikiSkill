@@ -355,8 +355,16 @@ export function JobTable({ jobs }: { jobs: Job[] }) {
 export function ObservationBody({
   body,
 }: {
-  body: { problem: string; action: string; outcome: string; lesson: string };
+  body: {
+    problem: string;
+    action: string;
+    outcome: string;
+    lesson: string;
+    original?: string;
+  };
 }) {
+  if (body.original !== undefined)
+    return <pre className="code-block">{body.original}</pre>;
   return (
     <Fields
       items={[

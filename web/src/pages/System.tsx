@@ -3,12 +3,14 @@ import { href } from "../routing";
 import { elapsed, short, time } from "../presentation";
 import { ErrorMessage, Fields } from "../components";
 import type { Snapshot } from "../types";
+import { Settings } from "./Manage";
 
 export function System({ snapshot, now }: { snapshot: Snapshot; now: number }) {
   const worker = snapshot.worker;
   const config = snapshot.config;
   return (
     <div className="system-grid">
+      <Settings />
       <section className="panel document-panel">
         <div className="eyebrow">RUNTIME</div>
         <h2>后台进程</h2>
@@ -58,23 +60,14 @@ export function System({ snapshot, now }: { snapshot: Snapshot; now: number }) {
         {config ? (
           <Fields
             items={[
-              ["Raw 阈值", `${config.raw_threshold} 条不同观察`],
-              ["Wiki 阈值", `${config.wiki_threshold} 个不同正文版本`],
+              ["Raw 阈值", `${config.raw_threshold} 个已结束轮次`],
+              ["Wiki 阈值", `${config.wiki_threshold} 个正文版本`],
               ["调度检查间隔", `${config.poll_seconds} 秒`],
               ["模型超时", `${config.timeout_seconds} 秒`],
               ["模型", config.model || "继承 Codex 默认模型"],
               ["自动启动", config.auto_start ? "开启" : "关闭"],
-              ["外部 Skill 管理", config.manage_external ? "开启" : "关闭"],
-              [
-                "允许的外部目录",
-                config.external_skills.length
-                  ? config.external_skills.map((path) => (
-                      <div key={path} className="path">
-                        {path}
-                      </div>
-                    ))
-                  : "未配置",
-              ],
+              ["Raw 自动转换", config.raw_auto ? "开启" : "关闭"],
+              ["Wiki 自动转换", config.wiki_auto ? "开启" : "关闭"],
             ]}
           />
         ) : (

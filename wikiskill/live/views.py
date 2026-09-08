@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import difflib
 import json
 import sqlite3
 import time
@@ -101,15 +102,15 @@ class ReadView:
 
     def snapshot(self) -> dict:
         config, error = self.config()
-        settings = ({name: getattr(config, name) for name in (
-            "raw_threshold", "wiki_threshold", "manage_external", "external_skills", "model",
-            "timeout_seconds", "poll_seconds", "auto_start", "codex_command")} if config else None)
+        from .settings import public_settings
+        settings = public_settings(config) if config else None
         with self.read() as db:
             result = {"initialized": db is not None, "root": str(self.root), "captured_at": time.time(),
                       "config": settings, "config_error": error, "worker": self.worker(db),
                       "cursor": 0, "projects": [], "totals": {"projects": 0, "skills": 0, "active": 0, "failed": 0}}
             if db is None:
                 return result
+            result["capture"] = dict(db.execute("SELECT * FROM capture_state WHERE id=1").fetchone() or {}) if has_table(db, "capture_state") else {}
             events = has_table(db, "runtime_events")
             if events:
                 result["cursor"] = db.execute("SELECT coalesce(max(seq),0) FROM runtime_events").fetchone()[0]
@@ -117,12 +118,14 @@ class ReadView:
             for project in rows(db, "SELECT * FROM projects ORDER BY name,id"):
                 key = project["id"]
                 raw = next((j for j in active_jobs if j["stage"] == "raw" and j["project"] == key), None)
-                counts = db.execute("SELECT count(*),sum(consumed_by IS NULL) FROM observations WHERE project=?", (key,)).fetchone()
-                batched = (db.execute("SELECT count(*) FROM observations WHERE project=? AND consumed_by IS NULL "
+                counts = db.execute("SELECT count(*),sum(consumed_by IS NULL) FROM trace_records WHERE project=?", (key,)).fetchone()
+                batched = (db.execute("SELECT count(*) FROM trace_records WHERE project=? AND consumed_by IS NULL "
                                       "AND id IN (SELECT value FROM json_each(?))", (key, raw["inputs"])).fetchone()[0] if raw else 0)
-                project["raw"] = self.queue(counts[1] or 0, batched, config.raw_threshold if config else None, raw, key)
+                project["raw"] = self.queue(counts[1] or 0, batched, config.raw_threshold if config else None, raw, key, config.raw_auto if config else None)
+                project["raw"]["ended_turns"] = db.execute("SELECT count(DISTINCT t.id) FROM trace_turns t JOIN trace_records r ON r.turn_id=t.id WHERE t.project=? AND t.ended=1 AND r.consumed_by IS NULL", (key,)).fetchone()[0]
                 project["observation_count"] = counts[0]
-                project["raw_count"] = db.execute("SELECT count(*) FROM raw WHERE project=?", (key,)).fetchone()[0]
+                project["raw_count"] = counts[0]
+                project["legacy_count"] = db.execute("SELECT count(*) FROM raw WHERE project=?", (key,)).fetchone()[0]
                 project["wiki_pages"] = db.execute("SELECT count(*) FROM wiki WHERE project=?", (key,)).fetchone()[0]
                 project["skills"] = []
                 for skill in rows(db, "SELECT s.* FROM skills s JOIN project_skills p ON p.skill=s.id WHERE p.project=? ORDER BY s.path", (key,)):
@@ -136,7 +139,7 @@ class ReadView:
                     pending = db.execute(pending_sql, args).fetchone()[0]
                     batched = (db.execute(pending_sql + " AND w.id IN (SELECT value FROM json_each(?))",
                                           (*args, active["inputs"])).fetchone()[0] if active and active["project"] == key else 0)
-                    skill["wiki"] = self.queue(pending, batched, config.wiki_threshold if config else None, active, key, skill["enabled"])
+                    skill["wiki"] = self.queue(pending, batched, config.wiki_threshold if config else None, active, key, (skill["enabled"] and config.wiki_auto) if config else None)
                     skill["version_count"] = db.execute("SELECT count(*) FROM versions WHERE skill=?", (skill["id"],)).fetchone()[0]
                     project["skills"].append(skill)
                 recent = db.execute("SELECT max(created) FROM raw WHERE project=?", (key,)).fetchone()[0]
@@ -220,14 +223,14 @@ class ReadView:
         with self.read() as db:
             job = self.require_job(db, job_id)
             if job["stage"] == "raw":
-                sql = ("SELECT o.*,r.source_id FROM observations o JOIN raw r ON r.id=o.raw_id "
-                       "WHERE o.project=? AND o.id IN (SELECT value FROM json_each(?)) ORDER BY o.id LIMIT ? OFFSET ?")
+                sql = ("SELECT id,source raw_id,session source_id,original body,consumed_by FROM trace_records "
+                       "WHERE project=? AND id IN (SELECT value FROM json_each(?)) ORDER BY id LIMIT ? OFFSET ?")
             else:
                 sql = "SELECT * FROM wiki_changes WHERE project=? AND id IN (SELECT value FROM json_each(?)) ORDER BY id LIMIT ? OFFSET ?"
             items = rows(db, sql, (job["project"], job["inputs"], limit + 1, offset))
             if job["stage"] == "raw":
                 for item in items:
-                    item["body"] = json.loads(item["body"])
+                    item["body"] = {"original": item["body"].decode("utf-8", errors="replace")}
             return page(items, offset, limit)
 
     def events(self, job_id: str, offset: int = 0, limit: int = 50) -> dict:
@@ -292,6 +295,8 @@ class ReadView:
             result["metadata"] = json.loads(result["metadata"])
             changes = rows(db, "SELECT * FROM wiki_changes WHERE project=? AND name=? ORDER BY id DESC LIMIT ? OFFSET ?", (project, name, limit + 1, offset))
             for change in changes:
+                previous = db.execute("SELECT body FROM wiki_changes WHERE project=? AND name=? AND id<? ORDER BY id DESC LIMIT 1", (project, name, change["id"])).fetchone()
+                change["diff"] = "".join(difflib.unified_diff((previous[0] if previous else "").splitlines(keepends=True), change["body"].splitlines(keepends=True), fromfile="before", tofile="after"))
                 change["source_job"] = change["job_id"] if db.execute("SELECT 1 FROM jobs WHERE id=?", (change["job_id"],)).fetchone() else None
                 change["consumers"] = rows(db, "SELECT s.id,s.path,c.job_id consumed_by FROM skills s JOIN project_skills p ON p.skill=s.id "
                                            "LEFT JOIN consumed_wiki c ON c.skill=s.id AND c.change_id=? WHERE p.project=? ORDER BY s.path", (change["id"], project))

@@ -18,7 +18,7 @@ from wikiskill.live.runtime import Runtime
 from wikiskill.live.telemetry import WorkerHeartbeat
 from wikiskill.live.views import ChangeCursor, ReadView
 from wikiskill.live.web import create_app
-from test_live_runtime import FakeSession, OBSERVATION
+from test_live_runtime import FakeSession, OBSERVATION, seed_record
 
 
 class LiveWebTests(unittest.TestCase):
@@ -27,7 +27,7 @@ class LiveWebTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.project = self.root / "project"
         self.project.mkdir()
-        self.runtime = Runtime(Config(self.root / "home", raw_threshold=2, wiki_threshold=1, auto_start=False), FakeSession)
+        self.runtime = Runtime(Config(self.root / "home", raw_threshold=2, wiki_threshold=1, auto_start=False, raw_auto=True, wiki_auto=True), FakeSession)
         self.key = self.runtime.store.project(str(self.project))
         self.view = ReadView(self.runtime.config.root)
         self.client = TestClient(create_app(self.runtime.config.root), base_url="http://127.0.0.1")
@@ -40,8 +40,8 @@ class LiveWebTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def collect(self, source="first", lesson="Check settings"):
-        return self.runtime.collect(str(self.project), source,
-                                    [OBSERVATION, {**OBSERVATION, "lesson": lesson}])
+        seed_record(self.runtime, self.key, source + "-one")
+        return seed_record(self.runtime, self.key, source + "-two")
 
     def test_uninitialized_app_and_cli_queries_are_read_only(self):
         empty = self.root / "absent"
@@ -61,24 +61,6 @@ class LiveWebTests(unittest.TestCase):
         self.assertEqual(files, set(self.view.root.rglob("*")))
         self.assertEqual(len(self.runtime.store.rows("SELECT id FROM projects")), 1)
         self.assertEqual(self.runtime.store.rows("SELECT id FROM jobs"), [])
-
-    def test_counts_distinguish_batch_inputs_and_later_deduplicated_content(self):
-        first = self.collect()
-        duplicate = self.collect("duplicate")
-        self.runtime.schedule()
-        self.runtime.collect(str(self.project), "later", [{**OBSERVATION, "lesson": "new after scheduling"}])
-        project = self.view.snapshot()["projects"][0]
-        self.assertEqual((project["raw"]["pending"], project["raw"]["batched"], project["raw"]["waiting"]), (3, 2, 1))
-        self.assertEqual(project["raw"]["reason"], "queued")
-        raw = self.view.raw_item(self.key, duplicate["raw_id"])
-        self.assertTrue(all(o["duplicate"] for o in raw["observations"]))
-        self.assertEqual(raw["observations"][0]["canonical_raw_id"], first["raw_id"])
-        self.assertIsNotNone(raw["observations"][0]["batch"])
-        repeated = self.runtime.collect(str(self.project), "same-submission", [{**OBSERVATION, "lesson": "repeat"}] * 2)
-        raw = self.view.raw_item(self.key, repeated["raw_id"])
-        self.assertEqual([o["duplicate"] for o in raw["observations"]], [False, True])
-        listed = self.view.raw(self.key)["items"]
-        self.assertEqual(next(r["added"] for r in listed if r["id"] == duplicate["raw_id"]), 0)
 
     def test_real_runtime_events_reports_wiki_and_complete_version_files(self):
         skill = self.runtime.store.skills(self.key)[0]
@@ -118,7 +100,7 @@ class LiveWebTests(unittest.TestCase):
         self.assertEqual(self.view.snapshot()["projects"][0]["raw"]["pending"], 0)
         FakeSession.no_change = False
         FakeSession.fail_generate = True
-        self.runtime.collect(str(self.project), "failure", [{**OBSERVATION, "lesson": str(i)} for i in range(2)])
+        self.collect("failure")
         self.runtime.drain()
         job = self.view.jobs(state="failed")["items"][0]
         self.assertEqual(job["report_status"], "sent")

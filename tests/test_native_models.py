@@ -5,9 +5,6 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
-from wikiskill.agents import InferenceAgent
-from wikiskill.data import TaskInput
-from wikiskill.environment import document_tools
 from wikiskill.model import GeminiModel, ModelConfig, ModelError, create_model
 
 
@@ -44,9 +41,12 @@ class GeminiTests(unittest.TestCase):
                                  api_key_env="GEMINI_FIXTURE_KEY", provider="gemini", thinking_budget=256, seed=7)
             with patch.dict(os.environ, {"GEMINI_FIXTURE_KEY": "test-only"}):
                 model = create_model(config)
-                result = InferenceAgent(model, environment=document_tools).run(TaskInput("t", "Read the fact", {"fact.txt": "42"}), {})
+                tools = [{"type": "function", "function": {"name": "read_file", "description": "Read a fixture", "parameters": {"type": "object"}}}]
+                messages = [{"role": "user", "content": "Read the fact"}]
+                first = model.complete(messages, tools)
+                result = model.complete([*messages, first.message, {"role": "tool", "tool_call_id": first.message["tool_calls"][0]["id"], "content": '{"content":"42"}'}], tools)
             self.assertIsInstance(model, GeminiModel)
-            self.assertEqual(result.output, "<answer>42</answer>")
+            self.assertEqual(result.message["content"], "<answer>42</answer>")
             self.assertEqual(len(captured), 2)
             self.assertEqual(captured[0][0], "/v1beta/models/gemini-fixture:generateContent")
             self.assertEqual(captured[0][2], "test-only")
@@ -56,7 +56,7 @@ class GeminiTests(unittest.TestCase):
             self.assertEqual(contents[1]["parts"][1]["thoughtSignature"], "opaque-signature")
             self.assertEqual(contents[2]["parts"][0]["functionResponse"]["id"], "provider-call")
             self.assertEqual(contents[2]["parts"][0]["functionResponse"]["response"]["result"]["content"], "42")
-            self.assertEqual(result.usage, [{"totalTokenCount": 17}] * 2)
+            self.assertEqual(result.usage, {"totalTokenCount": 17})
             self.assertNotIn("test-only", json.dumps(model.identity))
         finally:
             server.shutdown()

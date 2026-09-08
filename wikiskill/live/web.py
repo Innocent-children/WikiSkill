@@ -46,6 +46,130 @@ def create_app(root: str | Path = "~/.wikiskill") -> FastAPI:
     app = FastAPI(title="WikiSkill", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.view = view
 
+    @app.exception_handler(OSError)
+    async def filesystem_error(request: Request, exc: OSError):
+        return JSONResponse({"detail": f"文件操作失败，已有数据和恢复记录已保留：{exc}"}, status_code=409)
+
+    def runtime():
+        from .runtime import Runtime
+        from .config import Config
+        return Runtime(Config.load(view.root))
+
+    @app.exception_handler(ValueError)
+    async def invalid(request: Request, exc: ValueError):
+        return JSONResponse({"detail": str(exc)}, status_code=409)
+
+    @app.exception_handler(BlockingIOError)
+    async def busy(request: Request, exc: BlockingIOError):
+        return JSONResponse({"detail": "后台正在执行，请稍后再试"}, status_code=409)
+
+    @app.get("/api/settings")
+    def settings():
+        from .config import Config
+        from .settings import public_settings
+        return public_settings(Config.load(view.root))
+
+    @app.put("/api/settings")
+    def update_settings(values: dict):
+        from .settings import save_settings
+        value = save_settings(view.root, values)
+        runtime().wake()
+        return value
+
+    @app.post("/api/start")
+    def start():
+        return runtime().wake()
+
+    @app.post("/api/history-import")
+    def history_import():
+        from .capture import Collector
+        current = runtime()
+        result = Collector(current.config).request_history()
+        current.wake()
+        return result
+
+    @app.post("/api/projects")
+    def project_create(values: dict):
+        if set(values) != {"path"} or not isinstance(values["path"], str):
+            raise ValueError("Supply a project path")
+        return {"id": runtime().store.project(values["path"])}
+
+    @app.get("/api/projects/{project}/turns")
+    def turns(project: str, offset: Offset = 0, limit: Limit = 20):
+        from .traces import TraceView
+        return TraceView(view.root).turns(project, offset, limit)
+
+    @app.get("/api/projects/{project}/wiki-inputs")
+    def wiki_inputs(project: str, skill: str, offset: Offset = 0, limit: Limit = 20):
+        from .views import rows, page
+        with view.read() as db:
+            view.require_project(db, project)
+            if not db.execute("SELECT 1 FROM project_skills WHERE project=? AND skill=?", (project, skill)).fetchone():
+                raise KeyError("Skill 不属于当前项目")
+            values = rows(db, "SELECT id,name,substr(body,1,180) excerpt FROM wiki_changes w WHERE project=? AND NOT EXISTS "
+                          "(SELECT 1 FROM consumed_wiki c WHERE c.change_id=w.id AND c.skill=?) ORDER BY id LIMIT ? OFFSET ?",
+                          (project, skill, limit + 1, offset))
+            return page(values, offset, limit)
+
+    @app.get("/api/projects/{project}/traces")
+    def traces(project: str, turn_id: int | None = None, offset: Offset = 0, limit: Limit = 50):
+        from .traces import TraceView
+        return TraceView(view.root).records(project, turn_id, offset, limit)
+
+    @app.post("/api/projects/{project}/convert")
+    def convert(project: str, values: dict):
+        if set(values) - {"stage", "inputs", "skill"} or "stage" not in values:
+            raise ValueError("Supply stage, optional input IDs and Skill")
+        current = runtime()
+        result = current.enqueue(project, **values)
+        current.wake()
+        return result
+
+    @app.put("/api/projects/{project}/wiki")
+    def write_wiki(project: str, values: dict):
+        if set(values) != {"pages", "expected"}:
+            raise ValueError("Supply pages and expected digests")
+        current = runtime()
+        found = current.store.rows("SELECT path FROM projects WHERE id=?", (project,))
+        if not found:
+            raise KeyError("项目不存在")
+        result = current.put_wiki(found[0]["path"], **values)
+        current.wake()
+        return result
+
+    @app.post("/api/projects/{project}/wiki/rollback")
+    def rollback_wiki(project: str, values: dict):
+        if set(values) != {"change_id", "expected"} or type(values["change_id"]) is not int:
+            raise ValueError("Supply change_id and expected digest")
+        return runtime().rollback_wiki(project, **values)
+
+    @app.post("/api/jobs/{job_id}/retry")
+    def retry(job_id: str, values: dict):
+        if set(values) != {"regenerate"} or type(values["regenerate"]) is not bool:
+            raise ValueError("Supply regenerate boolean")
+        current = runtime()
+        result = current.retry(job_id, **values)
+        current.wake()
+        return result
+
+    @app.get("/api/skills/{skill_id}/install")
+    def install_preview(skill_id: str):
+        from .install import Installer
+        return Installer(runtime().store).preview(skill_id)
+
+    @app.post("/api/skills/{skill_id}/install")
+    def install(skill_id: str, values: dict):
+        from .install import Installer
+        if set(values) != {"source_digest", "target_digest", "overwrite"} or type(values["overwrite"]) is not bool:
+            raise ValueError("Supply preview digests and overwrite boolean")
+        return Installer(runtime().store).install(skill_id, **values)
+
+    @app.post("/api/skills/{skill_id}/rollback")
+    def rollback(skill_id: str, values: dict):
+        if set(values) != {"version_id", "side"}:
+            raise ValueError("Supply version_id and side")
+        return runtime().skills.rollback(skill_id, **values)
+
     @app.middleware("http")
     async def local_requests(request: Request, call_next):
         host = request.headers.get("host", "")

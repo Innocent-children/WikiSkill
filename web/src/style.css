@@ -1650,3 +1650,123 @@ summary {
     min-height: 44px;
   }
 }
+/* Knowledge operations share the existing workspace layout and typography. */
+.manage-workspace {
+  display: grid;
+  gap: 20px;
+}
+.manage-workspace button,
+.manage-form button,
+.manage-actions button {
+  border: 1px solid #d7dce7;
+  border-radius: 8px;
+  padding: 9px 14px;
+  background: #f4f6fd;
+  color: #3f4fa5;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.manage-workspace button:hover,
+.manage-form button:hover,
+.manage-actions button:hover {
+  background: #e9edff;
+}
+.manage-workspace button:disabled,
+.manage-form button:disabled,
+.manage-actions button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.manage-workspace button:focus-visible,
+.manage-form button:focus-visible {
+  outline: 3px solid #a2acf1;
+  outline-offset: 2px;
+}
+.manage-actions,
+.manage-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+.manage-tabs button[aria-pressed="true"] {
+  background: var(--accent, #347b68);
+  color: white;
+}
+.manage-grid,
+.manage-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+.manage-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0;
+}
+.manage-form input,
+.manage-form select,
+.manage-form textarea,
+.manage-actions input {
+  padding: 10px 12px;
+  border: 1px solid #cbd4ce;
+  border-radius: 7px;
+  font: inherit;
+  width: 100%;
+  background: var(--surface, #fff);
+  color: inherit;
+}
+.manage-form input[type="checkbox"] {
+  width: auto;
+  align-self: flex-start;
+}
+.manage-form textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+.manage-actions input {
+  max-width: 520px;
+}
+.manage-row {
+  width: 100%;
+  display: grid;
+  text-align: left;
+  gap: 8px;
+  padding: 14px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.manage-row span {
+  font-size: 12px;
+  opacity: 0.75;
+}
+.trace-record {
+  border-bottom: 1px solid #dbe2dc;
+  padding: 18px 0;
+}
+.trace-record pre,
+.install-preview pre {
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.install-preview {
+  border: 1px solid #91b7a9;
+  padding: 20px;
+  border-radius: 10px;
+  margin: 20px 0;
+}
+.manage-workspace details {
+  margin: 16px 0;
+}
+@media (max-width: 900px) {
+  .manage-grid,
+  .manage-split {
+    grid-template-columns: 1fr;
+  }
+}

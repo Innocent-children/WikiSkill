@@ -92,19 +92,11 @@ class LiveSkillsTests(unittest.TestCase):
         external = self.root / "external"
         external.mkdir()
         (external / "SKILL.md").write_text(SKILL)
-        config_path = self.store.config.root / "config.json"
-        values = json.loads(config_path.read_text())
-        values.update(manage_external=True, external_skills=[str(external)])
-        config_path.write_text(json.dumps(values))
-        store = Store(Config.load(self.store.config.root))
-        key = store.project(str(self.root))
-        enrolled = store.enroll(key, str(external))
-        manager = SkillManager(store)
-        manager.get(enrolled["skill_id"])
-        values["manage_external"] = False
-        config_path.write_text(json.dumps(values))
+        with self.store.transaction() as db:
+            db.execute("INSERT INTO skills VALUES('external',?,0)", (str(external),))
         with self.assertRaises(ValueError):
-            manager.get(enrolled["skill_id"])
+            SkillManager(self.store).get("external")
+
 
 
 if __name__ == "__main__":

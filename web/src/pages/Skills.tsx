@@ -1,3 +1,4 @@
+import { useAction } from "./Manage";
 import { useEffect, useState } from "react";
 import {
   ArrowDownToLine,
@@ -7,7 +8,7 @@ import {
   FileText,
   Folder,
 } from "lucide-react";
-import { useResource } from "../api";
+import { mutate, useResource } from "../api";
 import { href, navigate, type Route } from "../routing";
 import { query, short, time } from "../presentation";
 import {
@@ -94,17 +95,19 @@ export function SkillPage({
   revision: number;
 }) {
   const [offset, setOffset] = useState(0);
+  const [localRevision, setLocalRevision] = useState(0);
+  const action = useAction(() => setLocalRevision((n) => n + 1));
   const [tab, setTab] = useState("current");
   const skill = useResource<SkillDetail>(
     `/api/skills/${encodeURIComponent(route.skill!)}${query({ offset })}`,
-    revision,
+    revision + localRevision,
   );
   const selected = route.version || skill.data?.versions.items[0]?.id;
   const version = useResource<Version>(
     selected
       ? `/api/skills/${encodeURIComponent(route.skill!)}/versions/${encodeURIComponent(selected)}`
       : null,
-    revision,
+    revision + localRevision,
   );
   useEffect(() => {
     if (route.version) setTab("diff");
@@ -114,6 +117,26 @@ export function SkillPage({
     <>
       <Back to={href("skills", { project: route.project })}>全部 Skill</Back>
       <ErrorMessage error={skill.error} />
+      {action.status}
+      {selected && skill.data?.enabled && (
+        <div className="manage-actions">
+          <button
+            disabled={action.busy}
+            onClick={() =>
+              void action.run(
+                () =>
+                  mutate(`/api/skills/${route.skill}/rollback`, {
+                    version_id: selected,
+                    side: "after",
+                  }),
+                "已恢复选定版本的完整目录",
+              )
+            }
+          >
+            恢复选定历史版本
+          </button>
+        </div>
+      )}
       {data ? (
         <>
           <div className="detail-heading">
