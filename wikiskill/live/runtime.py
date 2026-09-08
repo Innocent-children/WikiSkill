@@ -16,6 +16,7 @@ from .codex import CodexSession
 from .config import Config, digest, normalized
 from .skills import SkillManager, file_lock, skill_text, snapshot, with_skill
 from .store import Store, dumps
+from .telemetry import WorkerHeartbeat
 
 
 def validate_pages(pages: list[dict]) -> None:
@@ -43,15 +44,20 @@ def write_pages(db, project: str, pages: list[dict], metadata: dict, job_id: str
         if current is None or current["digest"] != content_digest:
             count += db.execute("INSERT OR IGNORE INTO wiki_changes(project,name,digest,body,job_id) VALUES(?,?,?,?,?)",
                                 (project, page["name"], content_digest, page["body"], job_id)).rowcount
+    if pages:
+        Store.event(db, "wiki.updated", project=project,
+                    job_id=None if job_id.startswith("manual-") else job_id,
+                    names=[page["name"] for page in pages], new_changes=count)
     return count
 
 
 class Runtime:
-    def __init__(self, config: Config, session_factory=CodexSession):
+    def __init__(self, config: Config, session_factory=CodexSession, heartbeat: WorkerHeartbeat | None = None):
         self.config = config
         self.store = Store(config)
         self.skills = SkillManager(self.store)
         self.session_factory = session_factory
+        self.heartbeat = heartbeat
 
     def collect(self, project: str, source_id: str, observations: list, metadata: dict | None = None) -> dict:
         project_id = self.store.project(project)
@@ -104,6 +110,7 @@ class Runtime:
         key = uuid.uuid4().hex
         db.execute("INSERT INTO jobs(id,project,stage,skill,state,inputs,created) VALUES(?,?,?,?,'queued',?,?)",
                    (key, project, stage, skill, dumps(inputs), time.time()))
+        Store.event(db, "job.queued", project=project, job_id=key, skill=skill, input_count=len(inputs))
         return key
 
     def _context(self, job: dict) -> dict:
@@ -155,6 +162,8 @@ class Runtime:
                       "thread_id": job["thread_id"], "outcome": "changed" if details["changed"] else "no_change",
                       "summary": output["summary"], "inputs": job["inputs"], **details}
             db.execute("UPDATE jobs SET state='applied',report=?,report_sent=0,error=NULL WHERE id=?", (dumps(report), job["id"]))
+            self.store.event(db, "job.applied", project=job["project"], job_id=job["id"],
+                             skill=job["skill"], outcome=report["outcome"])
         return report
 
     def save_report(self, job_id: str) -> None:
@@ -171,33 +180,48 @@ class Runtime:
 
     def _report(self, session, job_id: str):
         job = self.store.job(job_id)
+        self.store.job_event(job_id, "report.sending")
         self.save_report(job_id)
         try:
             text = session.report(job["report"])
             report = {**job["report"], "conversation_report": text}
             report.pop("report_error", None)
-            self.store.update_job(job_id, report=report, report_sent=1)
+            self.store.update_job(job_id, report=report, report_sent=1, event="report.sent")
         except Exception as exc:
-            self.store.update_job(job_id, report={**job["report"], "report_error": str(exc)})
+            self.store.update_job(job_id, report={**job["report"], "report_error": str(exc)},
+                                  event="report.failed", event_payload={"error": str(exc)})
         self.save_report(job_id)
 
     def run_job(self, job_id: str):
+        if self.heartbeat:
+            self.heartbeat.set_job(job_id)
+        try:
+            self._run_job(job_id)
+        finally:
+            if self.heartbeat:
+                self.heartbeat.set_job(None)
+
+    def _run_job(self, job_id: str):
         job = self.store.job(job_id)
         lock = self.skills.lock(job["skill"]) if job["skill"] else nullcontext()
         with lock:
             job = self.store.job(job_id)
             if job["state"] in {"done", "failed"}:
                 return
+            self.store.job_event(job_id, "job.started")
             session = None
             try:
                 if job["context"] is None:
                     self.store.update_job(job_id, context=self._context(job))
+                self.store.job_event(job_id, "codex.connecting")
                 with self.session_factory(self.config) as session:
+                    if self.heartbeat:
+                        session.on_activity = self.heartbeat.touch
                     if job["thread_id"]:
                         session.resume(job["thread_id"])
                     else:
                         thread_id = session.start(f"WikiSkill {job['stage']} {job_id}")
-                        self.store.update_job(job_id, thread_id=thread_id)
+                        self.store.update_job(job_id, thread_id=thread_id, event="codex.session")
                     job = self.store.job(job_id)
                     try:
                         if job["state"] != "applied":
@@ -257,16 +281,16 @@ class Runtime:
                     if self.store.rows("SELECT id FROM versions WHERE job_id=?", (job_id,)):
                         raise ValueError("A retained publication must be recovered before regenerating")
                     fields.update(context=None, result=None)
-                self.store.update_job(job_id, **fields)
+                self.store.update_job(job_id, event="job.retried", event_payload={"regenerate": regenerate}, **fields)
             else:
                 raise ValueError("Job is already pending or running")
         return {"job_id": job_id, "state": self.store.job(job_id)["state"]}
 
     def worker(self, once: bool = False):
         try:
-            with file_lock(self.config.root / "locks" / "worker-process.lock", blocking=False):
+            with file_lock(self.config.root / "locks" / "worker-process.lock", blocking=False), WorkerHeartbeat(self.store) as heartbeat:
                 while True:
-                    current = Runtime(Config.load(self.config.root), self.session_factory)
+                    current = Runtime(Config.load(self.config.root), self.session_factory, heartbeat)
                     with file_lock(self.config.root / "locks" / "worker.lock"):
                         current.drain()
                     if once:

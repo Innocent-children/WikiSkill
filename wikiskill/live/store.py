@@ -32,6 +32,17 @@ CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, project TEXT NOT NULL, stag
 CREATE TABLE IF NOT EXISTS versions(id TEXT PRIMARY KEY, skill TEXT NOT NULL, job_id TEXT UNIQUE NOT NULL,
  before_bundle TEXT NOT NULL, after_bundle TEXT NOT NULL, diff TEXT NOT NULL,
  state TEXT NOT NULL, created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS runtime_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,
+ project TEXT, job_id TEXT, skill TEXT, kind TEXT NOT NULL, created REAL NOT NULL, payload TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS runtime_events_job ON runtime_events(job_id,seq);
+CREATE INDEX IF NOT EXISTS runtime_events_project ON runtime_events(project,seq);
+CREATE TABLE IF NOT EXISTS worker_runtime(id INTEGER PRIMARY KEY CHECK(id=1),
+ instance TEXT NOT NULL, pid INTEGER NOT NULL, started REAL NOT NULL, heartbeat REAL NOT NULL,
+ state TEXT NOT NULL, job_id TEXT, last_activity REAL, error TEXT);
+CREATE INDEX IF NOT EXISTS jobs_project_created ON jobs(project,created);
+CREATE INDEX IF NOT EXISTS observations_pending ON observations(project,consumed_by);
+CREATE INDEX IF NOT EXISTS raw_project_created ON raw(project,created);
+CREATE INDEX IF NOT EXISTS versions_skill_created ON versions(skill,created);
 """
 
 
@@ -50,8 +61,8 @@ class Store:
             db.executescript(SCHEMA)
 
     @contextmanager
-    def connect(self):
-        db = sqlite3.connect(self.path, timeout=30)
+    def connect(self, timeout: float = 30):
+        db = sqlite3.connect(self.path, timeout=timeout)
         db.row_factory = sqlite3.Row
         try:
             with db:
@@ -69,15 +80,32 @@ class Store:
         with self.connect() as db:
             return [dict(row) for row in db.execute(sql, args)]
 
+    @staticmethod
+    def event(db, kind: str, *, project: str | None = None, job_id: str | None = None,
+              skill: str | None = None, **payload) -> None:
+        """Append an event in the transaction that owns its related change."""
+        db.execute("INSERT INTO runtime_events(project,job_id,skill,kind,created,payload) VALUES(?,?,?,?,?,?)",
+                   (project, job_id, skill, kind, time.time(), dumps(payload)))
+
+    def job_event(self, job_id: str, kind: str, **payload) -> None:
+        with self.transaction() as db:
+            job = db.execute("SELECT project,skill FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if job is None:
+                raise ValueError("Unknown job")
+            self.event(db, kind, project=job["project"], skill=job["skill"], job_id=job_id, **payload)
+
     def project(self, directory: str) -> str:
         key, path = project_identity(directory)
         with self.transaction() as db:
+            previous = db.execute("SELECT path FROM projects WHERE id=?", (key,)).fetchone()
             db.execute("INSERT INTO projects VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET path=excluded.path",
                        (key, path, Path(path).name))
             skill_path = self.config.root / "skills" / f"wikiskill-{key}"
             skill_id = digest(str(skill_path))[:24]
             db.execute("INSERT OR IGNORE INTO skills VALUES(?,?,1)", (skill_id, str(skill_path)))
             db.execute("INSERT OR IGNORE INTO project_skills VALUES(?,?)", (key, skill_id))
+            if previous is None or previous["path"] != path:
+                self.event(db, "project.registered", project=key)
         return key
 
     def enroll(self, project: str, directory: str) -> dict:
@@ -90,6 +118,7 @@ class Store:
         with self.transaction() as db:
             db.execute("INSERT OR IGNORE INTO skills VALUES(?,?,0)", (key, str(path)))
             db.execute("INSERT OR IGNORE INTO project_skills VALUES(?,?)", (project, key))
+            self.event(db, "skill.enrolled", project=project, skill=key)
         return {"skill_id": key, "path": str(path)}
 
     def collect(self, project: str, source_id: str, observations: list[dict], metadata: dict) -> dict:
@@ -120,6 +149,8 @@ class Store:
             for body in bodies:
                 count += db.execute("INSERT OR IGNORE INTO observations(project,raw_id,digest,body) VALUES(?,?,?,?)",
                                     (project, key, digest(body), dumps(body))).rowcount
+            self.event(db, "raw.collected", project=project, raw_id=key, new_observations=count,
+                       submitted_observations=len(observations))
         return {"raw_id": key, "new_observations": count, "duplicate": False}
 
     def job(self, key: str) -> dict:
@@ -131,13 +162,18 @@ class Store:
             row[name] = json.loads(row[name]) if row[name] is not None else None
         return row
 
-    def update_job(self, key: str, **fields) -> None:
+    def update_job(self, key: str, *, event: str | None = None, event_payload: dict | None = None, **fields) -> None:
         allowed = {"state", "context", "result", "thread_id", "report", "report_sent", "error"}
         if not fields or set(fields) - allowed:
             raise ValueError("Invalid job fields")
         values = [dumps(v) if k in {"context", "result", "report"} else v for k, v in fields.items()]
         with self.transaction() as db:
             db.execute("UPDATE jobs SET " + ",".join(f"{k}=?" for k in fields) + " WHERE id=?", [*values, key])
+            if "state" in fields or event:
+                job = db.execute("SELECT project,skill FROM jobs WHERE id=?", (key,)).fetchone()
+                if job:
+                    self.event(db, event or "job." + fields["state"], project=job["project"], skill=job["skill"],
+                               job_id=key, **{"error": fields.get("error"), **(event_payload or {})})
 
     def skills(self, project: str) -> list[dict]:
         return self.rows("SELECT s.* FROM skills s JOIN project_skills p ON p.skill=s.id WHERE p.project=?",

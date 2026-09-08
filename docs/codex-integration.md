@@ -110,7 +110,9 @@ Raw 阈值统计**未成功处理的不同观察条目数**。Wiki 阈值统计*
 
 每个批次的报告同步保存为 `~/.wikiskill/reports/<job-id>.json` 和 `.md`，包含会话 ID、输入 ID、实际结果、修改理由、差异和版本 ID。连接失败还没创建会话时，报告中的会话 ID 为空；Codex 无法出具报告时，本地保留 `report_error`。`done` 表示内容处理完成，`report_sent` 单独表示会话报告完成。不要把报告发送失败解释成 Skill 没有发布。
 
-配置、队列、三层数据和全部版本存放在 `~/.wikiskill/state.sqlite3` 及同目录下的 `skills/`、`reports/`、`locks/`。这些文件包含用户主动提交的业务内容，采集前应移除密钥和无关私密信息。没有 WebUI；上述接口可供后续展示使用。
+配置、队列、三层数据和全部版本存放在 `~/.wikiskill/state.sqlite3` 及同目录下的 `skills/`、`reports/`、`locks/`。这些文件包含用户主动提交的业务内容，采集前应移除密钥和无关私密信息。
+
+执行 `wikiskill-codex web` 可在 `http://127.0.0.1:8765` 查看本地 WebUI，包含项目积累、批次时间线、输入、Wiki、报告和 Skill 版本快照。页面只读访问现有数据，MCP 和 worker 继续负责采集与处理。新版本 worker 每 5 秒记录心跳，阶段事件与相关状态一同持久化；历史批次缺失的阶段时间显示为未记录。启动、实时更新和开发说明见 [WebUI](webui.md)。
 
 ## 功能检查
 

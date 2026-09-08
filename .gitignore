@@ -9,3 +9,5 @@ runs/
 .codebase-memory/
 work/
 .idea/
+web/node_modules/
+web/coverage/

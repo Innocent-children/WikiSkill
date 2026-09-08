@@ -38,6 +38,7 @@ class CodexSession:
         self.sequence = 0
         self.thread_id = None
         self.stderr = deque(maxlen=20)
+        self.on_activity = None
 
     def __enter__(self):
         self.process = subprocess.Popen(self.config.codex_command, stdin=subprocess.PIPE,
@@ -101,6 +102,8 @@ class CodexSession:
             raise message
         if not isinstance(message, dict):
             raise RuntimeError("Codex message must be an object")
+        if self.on_activity is not None:
+            self.on_activity()
         if "method" in message and "id" in message:
             self.send({"id": message["id"], "error": {"code": -32601,
                       "message": "WikiSkill background sessions do not accept tool or approval requests"}})

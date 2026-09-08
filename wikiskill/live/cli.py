@@ -33,12 +33,19 @@ def main(argv=None):
     worker = commands.add_parser("worker", help="Run the persistent threshold worker")
     worker.add_argument("--once", action="store_true", help="Drain eligible jobs and exit")
     commands.add_parser("start", help="Start a detached worker")
+    web = commands.add_parser("web", help="Serve the local read-only WebUI")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8765)
     status = commands.add_parser("status", help="Query counts and job status")
     status.add_argument("--project")
     invoke = commands.add_parser("call", help="Call any MCP operation using a JSON object from stdin")
     invoke.add_argument("tool")
     args = parser.parse_args(argv)
     try:
+        if args.command == "web":
+            from .web import serve_web
+            serve_web(args.root, args.host, args.port)
+            return 0
         config = Config.load(args.root)
         runtime = Runtime(config)
         if args.command == "init":

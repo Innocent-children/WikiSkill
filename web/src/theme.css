@@ -1,0 +1,31 @@
+:root {
+  color-scheme: light dark;
+  --canvas: light-dark(#f5f6f8, #151719);
+  --surface: light-dark(#fff, #1f2225);
+  --sidebar: light-dark(#fafbfc, #1b1e21);
+  --ink: light-dark(#202124, #e8eaed);
+  --muted: light-dark(#626b75, #a6aeb8);
+  --line: light-dark(#e5e7eb, #343a41);
+  --hover: light-dark(#f3f5f7, #292e34);
+  --table-head: light-dark(#fafbfc, #23282e);
+  --code: light-dark(#f7f8fa, #171c21);
+  --track: light-dark(#edf0f3, #333c45);
+  --blue: light-dark(#3268d6, #84b4ff);
+  --on-blue: light-dark(#fff, #17283b);
+  --blue-hover: light-dark(#2456bb, #a3c7ff);
+  --blue-soft: light-dark(#edf3ff, #263750);
+  --blue-line: light-dark(#dbe6fb, #3d5473);
+  --blue-shadow: light-dark(#3268d61c, #00000022);
+  --green: light-dark(#337b51, #85cda2);
+  --green-soft: light-dark(#f0f8f3, #23392d);
+  --green-line: light-dark(#dcefe2, #36533f);
+  --amber: light-dark(#936817, #e8be72);
+  --amber-soft: light-dark(#fdf8ed, #3b3323);
+  --amber-line: light-dark(#f0e4c4, #594b2b);
+  --red: light-dark(#b94a42, #f2a49e);
+  --red-soft: light-dark(#fff3f2, #402928);
+  --red-line: light-dark(#f1deda, #67433e);
+  --focus: light-dark(#3268d6, #84b4ff);
+  --shadow: 0 2px 5px light-dark(#13294203, #0000000a);
+  --hover-shadow: 0 5px 18px light-dark(#13294209, #0000001a);
+}

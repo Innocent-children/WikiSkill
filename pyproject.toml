@@ -8,7 +8,11 @@ version = "0.1.0"
 description = "Independent reproduction of the WikiSkill evolution algorithm"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["PyYAML>=6.0"]
+dependencies = [
+    "fastapi>=0.115,<1",
+    "PyYAML>=6.0",
+    "uvicorn>=0.30,<1",
+]
 
 [project.optional-dependencies]
 spreadsheet = ["openpyxl>=3.1"]
@@ -24,6 +28,11 @@ include = ["wikiskill*"]
 
 [tool.setuptools.package-data]
 wikiskill = ["prompts/*.md", "prompts/*.json"]
-"wikiskill.live" = ["skill/SKILL.md"]
+"wikiskill.live" = ["skill/SKILL.md", "web_assets/*", "web_assets/assets/*"]
 "wikiskill.benchmarks" = ["Dockerfile"]
 "wikiskill.benchmarks.vendor" = ["LICENSE-*", "sources.json"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27,<1",
+]

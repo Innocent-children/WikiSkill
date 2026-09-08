@@ -154,6 +154,8 @@ class SkillManager:
         with self.store.transaction() as db:
             db.execute("INSERT INTO versions VALUES(?,?,?,?,?,?,?,?)",
                        (version_id, skill_id, job_id, dumps(before), dumps(after), difference, "prepared", time.time()))
+            self.store.event(db, "publication.prepared", skill=skill_id,
+                             job_id=None if job_id.startswith("rollback-") else job_id, version_id=version_id)
         return self.recover(version_id)
 
     def recover(self, version_id: str) -> dict:
@@ -184,6 +186,9 @@ class SkillManager:
                 os.replace(temporary, path)
         with self.store.transaction() as db:
             db.execute("UPDATE versions SET state='applied' WHERE id=?", (version_id,))
+            self.store.event(db, "publication.applied", skill=version["skill"],
+                             job_id=None if version["job_id"].startswith("rollback-") else version["job_id"],
+                             version_id=version_id)
         if previous.exists() and snapshot(previous) == before:
             shutil.rmtree(previous)
         return result

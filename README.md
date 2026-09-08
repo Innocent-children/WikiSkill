@@ -6,15 +6,16 @@ Python 3.11+，macOS / Linux；完整环境建议使用 Python 3.11。
 
 ## Codex 日常业务
 
-通过 MCP + skill 采集项目经验，Raw → Wiki、Wiki → Skill 分别按新增待处理内容阈值触发。后台使用新的 Codex 会话，自动备份并替换 Skill，完整保留历史和差异；报告保存在该会话及本地。业务模式不使用候选效果评分，不实现 WebUI。
+通过 MCP + skill 采集项目经验，Raw → Wiki、Wiki → Skill 分别按新增待处理内容阈值触发。后台使用新的 Codex 会话，自动备份并替换 Skill，完整保留历史和差异；报告保存在该会话及本地。业务模式不使用候选效果评分。本地 WebUI 可查看项目积累、实时批次状态、Wiki、报告及 Skill 版本差异。
 
 ```bash
 uv sync --frozen
 uv run --frozen wikiskill-codex init
 uv run --frozen wikiskill-codex install-skill
+uv run --frozen wikiskill-codex web
 ```
 
-配置位于 `~/.wikiskill/config.json`。按 `init` 输出的 Python 路径注册 MCP 后，在业务任务使用 `$wikiskill`。默认只管理自产 Skill；外部 Skill 通过开关、目录列表和项目关联纳入管理。安装、采集方式、阈值计量、后台运行、查询与回退见 [Codex 接入说明](docs/codex-integration.md)。下文介绍原有论文实验入口。
+配置位于 `~/.wikiskill/config.json`。按 `init` 输出的 Python 路径注册 MCP 后，在业务任务使用 `$wikiskill`。默认只管理自产 Skill；外部 Skill 通过开关、目录列表和项目关联纳入管理。WebUI 默认地址为 `http://127.0.0.1:8765`，只读展示已有记录。安装、采集方式、阈值计量、后台运行、查询与回退见 [Codex 接入说明](docs/codex-integration.md)，页面与开发说明见 [WebUI](docs/webui.md)。下文介绍原有论文实验入口。
 
 ## 安装与快速检查
 
