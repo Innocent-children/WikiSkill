@@ -9,8 +9,6 @@ from pathlib import Path
 from wikiskill.storage import atomic_text
 
 from .config import Config
-from .mcp import call, serve
-from .runtime import Runtime
 
 
 def install_skill(directory: Path) -> str:
@@ -26,6 +24,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="WikiSkill Codex business integration")
     parser.add_argument("--root", default="~/.wikiskill", help="User configuration and data directory")
     commands = parser.add_subparsers(dest="command", required=True)
+    doctor = commands.add_parser("doctor", help="Diagnose the local environment without changing data",
+        description="Read-only local checks; no processes, model calls or network requests. "
+                    "Exit 0 with no blocking problems, 1 otherwise. Configuration values stay private.")
+    doctor.add_argument("--json", action="store_true", help="Print structured diagnostic results")
     init = commands.add_parser("init", help="Write the current default configuration")
     init.add_argument("--reset-settings", action="store_true", help="Replace settings with current defaults; preserve all data")
     install = commands.add_parser("install-skill", help="Install the business collection skill")
@@ -44,6 +46,11 @@ def main(argv=None):
     invoke = commands.add_parser("call", help="Call any MCP operation using a JSON object from stdin")
     invoke.add_argument("tool")
     args = parser.parse_args(argv)
+    if args.command == "doctor":
+        from .doctor import diagnose, format_report
+        report = diagnose(args.root)
+        print(json.dumps(report, ensure_ascii=False, indent=2) if args.json else format_report(report))
+        return 0 if report["ok"] else 1
     try:
         if args.command == "web":
             from .web import serve_web
@@ -57,6 +64,8 @@ def main(argv=None):
             atomic_text(defaults.root / "config.json", json.dumps(values, ensure_ascii=False, indent=2) + "\n")
             (defaults.root / "config.json").chmod(0o600)
         config = Config.load(args.root)
+        from .mcp import call, serve
+        from .runtime import Runtime
         runtime = Runtime(config)
         if args.command == "init":
             result = {"config": str(config.root / "config.json"), "mcp_command":

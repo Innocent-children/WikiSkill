@@ -88,12 +88,12 @@ class ReadView:
               project: str, enabled: bool | None = True) -> dict:
         if enabled is None or threshold is None:
             reason = "config_error"
-        elif not enabled:
-            reason = "disabled"
         elif active:
             reason = ("failed" if active["state"] == "failed" else
                       "shared_busy" if active["project"] != project else
                       "queued" if active["state"] == "queued" else "processing")
+        elif not enabled:
+            reason = "disabled"
         else:
             reason = "ready" if pending >= threshold else "accumulating"
         return {"pending": pending, "batched": batched, "waiting": max(0, pending - batched),
@@ -139,7 +139,7 @@ class ReadView:
                     pending = db.execute(pending_sql, args).fetchone()[0]
                     batched = (db.execute(pending_sql + " AND w.id IN (SELECT value FROM json_each(?))",
                                           (*args, active["inputs"])).fetchone()[0] if active and active["project"] == key else 0)
-                    skill["wiki"] = self.queue(pending, batched, config.wiki_threshold if config else None, active, key, (skill["enabled"] and config.wiki_auto) if config else None)
+                    skill["wiki"] = self.queue(pending, batched, config.wiki_threshold if config else None, active, key, (skill["enabled"] and config.wiki_auto and skill["name"] == f"wikiskill-{key}") if config else None)
                     skill["version_count"] = db.execute("SELECT count(*) FROM versions WHERE skill=?", (skill["id"],)).fetchone()[0]
                     project["skills"].append(skill)
                 recent = db.execute("SELECT max(created) FROM raw WHERE project=?", (key,)).fetchone()[0]
@@ -278,12 +278,19 @@ class ReadView:
             result["observations"] = observations
             return result
 
-    def wiki(self, project: str, offset: int = 0, limit: int = 20) -> dict:
+    def wiki(self, project: str, offset: int = 0, limit: int = 20, q: str = "") -> dict:
         with self.read() as db:
             self.require_project(db, project)
+            condition = "project=?"
+            args = [project]
+            if q:
+                db.create_function("casefold", 1, str.casefold, deterministic=True)
+                condition += " AND (instr(casefold(name),?) > 0 OR instr(casefold(body),?) > 0)"
+                args.extend([q.casefold(), q.casefold()])
             return page(rows(db, "SELECT name,digest,substr(body,1,180) excerpt,length(body) characters,"
                              "(SELECT count(*) FROM wiki_changes c WHERE c.project=w.project AND c.name=w.name) revisions "
-                             "FROM wiki w WHERE project=? ORDER BY name LIMIT ? OFFSET ?", (project, limit + 1, offset)), offset, limit)
+                             f"FROM wiki w WHERE {condition} ORDER BY name LIMIT ? OFFSET ?",
+                             (*args, limit + 1, offset)), offset, limit)
 
     def wiki_item(self, project: str, name: str, offset: int = 0, limit: int = 20) -> dict:
         with self.read() as db:

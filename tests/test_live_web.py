@@ -161,6 +161,16 @@ class LiveWebTests(unittest.TestCase):
         self.assertFalse(self.view.skill(shared)["enabled"])
         self.assertTrue(self.view.skill(shared)["versions"]["items"])
 
+    def test_model_limits_are_saved_without_fixed_ceiling(self):
+        response = self.client.put("/api/settings", json={"max_tokens": 500000, "context_window": 2000000})
+        self.assertEqual(response.status_code, 200)
+        saved = self.client.get("/api/settings").json()
+        self.assertEqual(saved["max_tokens"], 500000)
+        self.assertEqual(saved["context_window"], 2000000)
+        self.assertNotIn("input_budget", saved)
+        for value in (0, -1, 1.5, True):
+            self.assertEqual(self.client.put("/api/settings", json={"max_tokens": value}).status_code, 409)
+
     def test_config_errors_limits_and_local_access(self):
         self.assertEqual(self.client.get("/api/jobs?limit=0").status_code, 422)
         self.assertEqual(self.client.get("/api/jobs?offset=-1").status_code, 422)
@@ -190,6 +200,61 @@ class LiveWebTests(unittest.TestCase):
         self.assertIsNone(job["started_at"])
         self.assertIsNone(job["finished_at"])
         self.assertEqual(self.view.events(job["id"])["items"], [])
+
+    def test_wiki_search_matches_names_and_full_current_body_as_literal_text(self):
+        self.runtime.put_wiki(str(self.project), [
+            {"name": "build-guide", "body": "Compile the project"},
+            {"name": "details", "body": "x" * 200 + " 中文 MiXeD Straße 100% foo_bar a+b &? #tag 'quote'"},
+            {"name": "plain", "body": "100 percent fooXbar"},
+        ])
+        path = f"/api/projects/{self.key}/wiki"
+        before = self.view.path.read_bytes()
+        for term, expected in [
+            ("BUILD-GUIDE", ["build-guide"]), ("COMPILE", ["build-guide"]),
+            ("中文", ["details"]), ("mixed", ["details"]),
+            ("STRASSE", ["details"]), ("%", ["details"]),
+            ("_", ["details"]), ("foo_bar", ["details"]),
+            ("a+b &? #tag", ["details"]), ("'quote'", ["details"]),
+            ("' OR 1=1 --", []), ("not present", []),
+        ]:
+            with self.subTest(q=term):
+                response = self.client.get(path, params={"q": term})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual([item["name"] for item in response.json()["items"]], expected)
+                self.assertIsNone(response.json()["next_offset"])
+        self.assertEqual(self.client.get(path).json(), self.client.get(path, params={"q": ""}).json())
+        self.assertEqual(before, self.view.path.read_bytes())
+
+    def test_wiki_search_filters_before_pagination_and_excludes_other_projects_and_history(self):
+        self.runtime.put_wiki(str(self.project), [
+            {"name": "a-unrelated", "body": "No match"},
+            {"name": "b-result", "body": "Needle one"},
+            {"name": "c-result", "body": "needle two"},
+            {"name": "d-old", "body": "needle old-only"},
+        ])
+        self.runtime.put_wiki(str(self.project), [{"name": "d-old", "body": "Replacement text"}])
+        other = self.root / "other"
+        other.mkdir()
+        self.runtime.put_wiki(str(other), [{"name": "foreign", "body": "needle foreign-only"}])
+        path = f"/api/projects/{self.key}/wiki"
+        before = self.runtime.store.rows("SELECT * FROM wiki ORDER BY project,name")
+        history = self.runtime.store.rows("SELECT * FROM wiki_changes ORDER BY id")
+        first = self.client.get(path, params={"q": "NEEDLE", "limit": 1}).json()
+        self.assertEqual([item["name"] for item in first["items"]], ["b-result"])
+        self.assertEqual(first["next_offset"], 1)
+        second = self.client.get(path, params={"q": "NEEDLE", "limit": 1, "offset": first["next_offset"]}).json()
+        self.assertEqual([item["name"] for item in second["items"]], ["c-result"])
+        self.assertIsNone(second["next_offset"])
+        self.assertEqual(self.view.wiki(self.key, offset=2, limit=1, q="needle")["items"], [])
+        self.assertEqual([item["name"] for item in self.view.wiki(self.key)["items"]],
+                         ["a-unrelated", "b-result", "c-result", "d-old"])
+        for term in ("old-only", "foreign-only"):
+            self.assertEqual(self.client.get(path, params={"q": term}).json()["items"], [])
+        self.assertEqual(self.client.get("/api/projects/missing/wiki", params={"q": "needle"}).status_code, 404)
+        self.assertEqual(self.client.get(path, params={"q": "needle", "offset": -1}).status_code, 422)
+        self.assertEqual(self.client.get(path, params={"q": "needle", "limit": 0}).status_code, 422)
+        self.assertEqual(before, self.runtime.store.rows("SELECT * FROM wiki ORDER BY project,name"))
+        self.assertEqual(history, self.runtime.store.rows("SELECT * FROM wiki_changes ORDER BY id"))
 
     def test_heartbeat_continues_during_generation_and_stale_transition_notifies(self):
         entered, release = threading.Event(), threading.Event()

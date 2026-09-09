@@ -44,7 +44,8 @@ class Config:
     api_url: str = "https://api.openai.com/v1"
     api_model: str = ""
     api_key: str = field(default="", repr=False)
-    input_budget: int = 200000
+    max_tokens: int = 384000
+    context_window: int = 1000000
     codex_command: list[str] = field(default_factory=lambda: ["codex", "app-server"])
     model: str | None = None
     timeout_seconds: int = 600
@@ -53,7 +54,7 @@ class Config:
 
     def __post_init__(self):
         object.__setattr__(self, "root", Path(self.root).expanduser().resolve())
-        for key in ("raw_threshold", "wiki_threshold", "timeout_seconds", "poll_seconds", "input_budget"):
+        for key in ("raw_threshold", "wiki_threshold", "timeout_seconds", "poll_seconds", "max_tokens", "context_window"):
             if type(getattr(self, key)) is not int or getattr(self, key) < 1:
                 raise ValueError(f"{key} must be a positive integer")
         for key in ("raw_auto", "wiki_auto", "auto_start"):

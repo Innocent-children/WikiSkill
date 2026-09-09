@@ -1,7 +1,14 @@
-import { useState } from "react";
-import { mutate, useResource } from "../api";
-import { ErrorMessage, Markdown } from "../components";
-import { href } from "../routing";
+import { useAction } from "../actions";
+import { SkillGeneration } from "../SkillGeneration";
+import { WikiTransfer } from "../WikiTransfer";
+import { WikiSearch } from "../WikiSearch";
+import { useEffect, useRef, useState } from "react";
+import { mutate, request, useResource } from "../api";
+import { Empty, ErrorMessage, Loading, Markdown } from "../components";
+import { href, navigate } from "../routing";
+import { query } from "../presentation";
+import { confirmDiscardChanges, useUnsavedChanges } from "../unsaved";
+import { ArrowRight, Check, Plus } from "lucide-react";
 import type { Config, Page, Snapshot } from "../types";
 
 type Turn = {
@@ -35,44 +42,12 @@ type Preview = {
   target_digest: string;
 };
 
-export function useAction(refresh: () => void = () => {}) {
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-  async function run(
-    work: () => Promise<unknown>,
-    success: string | ((value: unknown) => string) = "已完成",
-  ) {
-    setBusy(true);
-    setError(null);
-    setMessage("");
-    try {
-      const value = await work();
-      setMessage(typeof success === "function" ? success(value) : success);
-      refresh();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return {
-    run,
-    busy,
-    status: (
-      <>
-        <ErrorMessage error={error} />
-        <p role="status">{message}</p>
-      </>
-    ),
-  };
-}
-
 export function Settings() {
   const resource = useResource<Config>("/api/settings");
   return (
     <>
       {resource.error && <ErrorMessage error={resource.error} />}
+      {resource.loading && !resource.data && <Loading />}
       {resource.data && <SettingsForm initial={resource.data} />}
     </>
   );
@@ -123,84 +98,120 @@ function SettingsForm({ initial }: { initial: Config }) {
         }, "设置已保存");
       }}
     >
-      <h2>转换与采集设置</h2>
+      <h2>整理偏好</h2>
       <p>自动采集只保存原文。模型仅在手动转换或开启的阈值满足时运行。</p>
-      <div className="manage-grid">
-        <label>
-          执行方式
-          <select
-            value={values.executor}
-            onChange={(e) => setValues({ ...values, executor: e.target.value })}
-          >
-            <option value="codex">Codex 新建会话</option>
-            <option value="api">API 模型</option>
-          </select>
-        </label>
-        <label>
-          API 协议
-          <select
-            value={values.api_provider}
-            onChange={(e) =>
-              setValues({ ...values, api_provider: e.target.value })
-            }
-          >
-            <option value="chat_completions">Chat Completions</option>
-            <option value="gemini">Gemini</option>
-          </select>
-        </label>
-        {text("api_url", "API 地址")}
-        {text("api_model", "API 模型")}
-        <label>
-          API key（{values.api_key_configured ? "已配置，留空保留" : "未配置"}）
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-          />
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={clear}
-            onChange={(e) => setClear(e.target.checked)}
-          />
-          清除已存密钥
-        </label>
-        {text("model", "Codex 模型（空值使用默认）")}
-        {text("input_budget", "模型输入字符预算", "number")}
-        {text("raw_threshold", "Raw 自动阈值（已结束轮次）", "number")}
-        {text("wiki_threshold", "Wiki 自动阈值（正文版本）", "number")}
-        {(
-          [
-            ["raw_auto", "自动 Raw → Wiki"],
-            ["wiki_auto", "自动 Wiki → Skill"],
-            ["auto_start", "连接 MCP 时自动启动后台"],
-          ] as const
-        ).map(([name, label]) => (
-          <label key={name}>
-            <input
-              type="checkbox"
-              checked={values[name]}
+      <fieldset>
+        <legend>01 · 选择整理经验的模型</legend>
+        <p className="muted small">使用本机 Codex，或连接自己的模型 API。</p>
+        <div className="manage-grid">
+          <label>
+            执行方式
+            <select
+              value={values.executor}
               onChange={(e) =>
-                setValues({ ...values, [name]: e.target.checked })
+                setValues({ ...values, executor: e.target.value })
               }
-            />
-            {label}
+            >
+              <option value="codex">Codex 新建会话</option>
+              <option value="api">API 模型</option>
+            </select>
           </label>
-        ))}
-        {text("codex_home", "Codex 数据目录")}
-        {text("install_directory", "Codex Skill 安装目录")}
-        {text("poll_seconds", "后台扫描间隔（秒）", "number")}
-        {text("timeout_seconds", "模型超时（秒）", "number")}
-        <label>
-          Codex 启动命令（JSON 数组）
-          <input value={command} onChange={(e) => setCommand(e.target.value)} />
-        </label>
+          {values.executor === "api" && (
+            <>
+              <label>
+                API 协议
+                <select
+                  value={values.api_provider}
+                  onChange={(e) =>
+                    setValues({ ...values, api_provider: e.target.value })
+                  }
+                >
+                  <option value="chat_completions">Chat Completions</option>
+                  <option value="gemini">Gemini</option>
+                </select>
+              </label>
+              {text("api_url", "API 地址")}
+              {text("api_model", "API 模型")}
+              {text("max_tokens", "最大输出（tokens）", "number")}
+              {text("context_window", "上下文窗口（tokens）", "number")}
+              <p className="muted small">最大输出随请求发送；上下文窗口用于记录模型容量，由模型服务判断是否超限。</p>
+              <label>
+                API key（
+                {values.api_key_configured ? "已配置，留空保留" : "未配置"}）
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={key}
+                  onChange={(e) => setKey(e.target.value)}
+                />
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={clear}
+                  onChange={(e) => setClear(e.target.checked)}
+                />
+                清除已存密钥
+              </label>
+            </>
+          )}
+          {values.executor === "codex" &&
+            text("model", "Codex 模型（空值使用默认）")}
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>02 · 自动整理</legend>
+        <p className="muted small">
+          关闭时由你手动发起。开启后，累计到设定数量会自动整理；Wiki
+          自动转换只更新项目汇总 Skill，专题 Skill 在知识文档中手动更新。
+        </p>
+        <div className="manage-grid">
+          {(
+            [
+              ["raw_auto", "自动 Raw → Wiki"],
+              ["wiki_auto", "自动 Wiki → Skill"],
+              ["auto_start", "连接 MCP 时自动启动后台"],
+            ] as const
+          ).map(([name, label]) => (
+            <label key={name}>
+              <input
+                type="checkbox"
+                checked={values[name]}
+                onChange={(e) =>
+                  setValues({ ...values, [name]: e.target.checked })
+                }
+              />
+              {label}
+            </label>
+          ))}
+          {values.raw_auto &&
+            text("raw_threshold", "累计多少个已结束轮次后整理", "number")}
+          {values.wiki_auto &&
+            text("wiki_threshold", "累计多少个知识版本后生成 Skill", "number")}
+        </div>
+      </fieldset>
+      <details className="settings-advanced">
+        <summary>高级设置 · 目录、超时与启动命令</summary>
+        <div className="manage-grid">
+          {text("codex_home", "Codex 数据目录")}
+          {text("install_directory", "Codex Skill 安装目录")}
+          {text("poll_seconds", "后台扫描间隔（秒）", "number")}
+          {text("timeout_seconds", "模型超时（秒）", "number")}
+          <label>
+            Codex 启动命令（JSON 数组）
+            <input
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+            />
+          </label>
+        </div>
+      </details>
+      <div className="save-bar">
+        <span className="muted small">修改后保存，下一次整理时生效。</span>
+        <button className="primary" disabled={action.busy} type="submit">
+          {action.busy ? "正在保存…" : "保存设置"}
+        </button>
       </div>
-      <button disabled={action.busy} type="submit">
-        保存设置
-      </button>
       {action.status}
     </form>
   );
@@ -211,88 +222,205 @@ export function Manage({
   revision,
   refresh,
   project,
+  layer,
+  wiki,
 }: {
   snapshot: Snapshot;
   revision: number;
   refresh: () => void;
   project?: string;
+  layer?: string;
+  wiki?: string;
 }) {
-  const [tab, setTab] = useState("raw");
   const [path, setPath] = useState("");
-  const selected =
-    snapshot.projects.find((p) => p.id === project) || snapshot.projects[0];
-  const action = useAction(refresh);
+  const [createdProject, setCreatedProject] = useState<string | null>(null);
+  useEffect(() => {
+    if (
+      createdProject &&
+      snapshot.projects.some((p) => p.id === createdProject)
+    ) {
+      navigate("manage", { project: createdProject, layer: "wiki" });
+      setCreatedProject(null);
+    }
+  }, [createdProject, snapshot.projects]);
+  const [search, setSearch] = useState("");
+  const selected = snapshot.projects.find((p) => p.id === project);
+  const tab = ["raw", "wiki", "skill"].includes(layer || "") ? layer! : "raw";
+  const createAction = useAction(refresh);
+  const steps = [
+    {
+      id: "raw",
+      title: "原始记录",
+      description: "查看对话，整理为知识",
+      count: selected?.raw.pending,
+    },
+    {
+      id: "wiki",
+      title: "知识文档",
+      description: "阅读、编辑与生成 Skill",
+      count: selected?.wiki_pages,
+    },
+    {
+      id: "skill",
+      title: "Skill 管理",
+      description: "查看结果与安装",
+      count: selected?.skills.filter((s) => s.owned).length,
+    },
+  ];
+  const guide = (
+    <details
+      className="panel setup-guide"
+      open={!snapshot.projects.length ? true : undefined}
+    >
+      <summary>
+        使用指南与数据接入{" "}
+        <span className="muted small">从第一次使用到安装 Skill</span>
+      </summary>
+      <div className="guide-grid">
+        <div>
+          <span className="step-number">1</span>
+          <h3>连接与配置</h3>
+          <p>
+            运行 <code>wikiskill-codex init</code>，将输出的 mcp_command 注册到
+            Codex。连接后，新对话会自动采集。
+          </p>
+          <a href={href("system", { project })}>
+            前往设置 <ArrowRight size={14} />
+          </a>
+        </div>
+        <div>
+          <span className="step-number">2</span>
+          <h3>准备项目经验</h3>
+          <p>
+            首次采集从启用时开始。导入历史可读取本机已有对话，也可以添加项目后直接编写知识。
+          </p>
+          <a href={href("system", { project })}>前往设置导入历史 →</a>
+        </div>
+        <div>
+          <span className="step-number">3</span>
+          <h3>整理并应用</h3>
+          <p>
+            选择项目，将记录整理为知识，检查后生成 Skill，最后点击“安装到
+            Codex”。
+          </p>
+          <a href={href("jobs", { project })}>
+            查看执行进度 <ArrowRight size={14} />
+          </a>
+        </div>
+      </div>
+      <div className="guide-footer">
+        <span className="muted small">
+          {snapshot.worker.status === "online"
+            ? "后台已连接，正在自动采集新记录"
+            : "需要后台运行才能采集记录和执行整理"}
+        </span>
+        <a href={href("system", { project })}>管理后台 →</a>
+      </div>
+    </details>
+  );
   return (
     <div className="manage-workspace">
-      <section className="panel document-panel">
-        <div className="eyebrow">KNOWLEDGE WORKSPACE</div>
-        <h2>从轨迹到可复用的经验</h2>
-        <p>
-          正常使用 Codex，自动积累原始记录。在这里整理 Wiki、生成
-          Skill，再决定何时安装。
-        </p>
-        <div className="manage-actions">
-          <button
-            disabled={action.busy}
-            onClick={() =>
-              void action.run(() => mutate("/api/start"), "后台启动已请求")
-            }
-          >
-            启动后台
-          </button>
-          <button
-            disabled={action.busy}
-            onClick={() =>
-              void action.run(
-                () => mutate("/api/history-import"),
-                "历史导入已请求，后台将读取已有轨迹",
-              )
-            }
-          >
-            导入已有历史
-          </button>
-          <a href={href("system")}>配置模型与自动阈值</a>
+      <section className={`workspace-hero ${selected ? "is-project" : ""}`}>
+        <div className="workspace-title">
+          <div className="eyebrow">
+            {selected ? "PROJECT WORKSPACE" : "WIKISKILL / PERSONAL KNOWLEDGE"}
+          </div>
+          <h1>
+            {selected ? (
+              selected.name
+            ) : (
+              <>
+                让经验，
+                <br />
+                <em>持续生长。</em>
+              </>
+            )}
+          </h1>
+          <p>
+            {selected
+              ? selected.path
+              : "记录解决问题的过程，积累值得复用的知识。"}
+          </p>
         </div>
-        <form
-          className="manage-actions"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void action.run(
-              () => mutate("/api/projects", { path }),
-              "项目已添加",
-            );
-          }}
-        >
-          <input
-            aria-label="项目目录"
-            placeholder="项目绝对路径，可手动添加"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-          />
-          <button disabled={action.busy || !path}>添加项目</button>
-        </form>
-        {action.status}
+        {!selected && (
+          <dl className="workspace-totals" aria-label="知识空间统计">
+            <div>
+              <dt>项目空间</dt>
+              <dd>{snapshot.projects.length.toString().padStart(2, "0")}</dd>
+            </div>
+            <div>
+              <dt>知识文档</dt>
+              <dd>
+                {snapshot.projects
+                  .reduce((total, p) => total + p.wiki_pages, 0)
+                  .toString()
+                  .padStart(2, "0")}
+              </dd>
+            </div>
+            <div>
+              <dt>项目 Skill</dt>
+              <dd>
+                {new Set(
+                  snapshot.projects.flatMap((p) =>
+                    p.skills.filter((s) => s.owned).map((s) => s.id),
+                  ),
+                ).size
+                  .toString()
+                  .padStart(2, "0")}
+              </dd>
+            </div>
+          </dl>
+        )}
       </section>
+      {!snapshot.projects.length && guide}
       {selected ? (
         <>
-          <nav className="manage-tabs" aria-label="知识层">
-            {[
-              ["raw", "Raw 原始轨迹"],
-              ["wiki", "Wiki 知识页"],
-              ["skill", "Skill 生成与安装"],
-            ].map(([id, label]) => (
-              <button
-                key={id}
-                aria-pressed={tab === id}
-                onClick={() => setTab(id)}
+          <div className="project-context">
+            <a className="subdued-link" href={href("manage")}>
+              ← 全部项目
+            </a>
+            <a className="subdued-link" href={href("jobs", { project })}>
+              执行记录{" "}
+              {selected.active_jobs > 0
+                ? `· ${selected.active_jobs} 个进行中`
+                : ""}
+              <ArrowRight size={14} />
+            </a>
+          </div>
+          <nav className="workflow-steps" aria-label="项目工作流程">
+            {steps.map((step, index) => (
+              <a
+                key={step.id}
+                href={href("manage", { project, layer: step.id })}
+                aria-current={tab === step.id ? "step" : undefined}
               >
-                {label}
-              </button>
+                <span className="step-number">{index + 1}</span>
+                <div>
+                  <strong>
+                    {step.title} <small>{step.count ?? 0}</small>
+                  </strong>
+                  <span>{step.description}</span>
+                </div>
+              </a>
             ))}
           </nav>
-          <p className="muted">
-            当前项目：{selected.name} · {selected.path}
-          </p>
+          {(selected.active_jobs > 0 || selected.failed_jobs > 0) && (
+            <div className="next-action">
+              <span className="muted small">
+                {selected.active_jobs > 0
+                  ? "正在整理，结果会自动更新。"
+                  : "有执行记录需要处理。"}
+              </span>
+              {selected.active_jobs > 0 && (
+                <a href={href("jobs", { project })}>查看进度 →</a>
+              )}
+              {selected.failed_jobs > 0 && (
+                <a href={href("jobs", { project, state: "failed" })}>
+                  失败记录（{selected.failed_jobs}）→
+                </a>
+              )}
+            </div>
+          )}
           {tab === "raw" ? (
             <RawPanel
               key={selected.id}
@@ -302,6 +430,7 @@ export function Manage({
             />
           ) : tab === "wiki" ? (
             <WikiPanel
+              initialName={wiki}
               key={selected.id}
               project={selected.id}
               revision={revision}
@@ -317,14 +446,129 @@ export function Manage({
           )}
         </>
       ) : (
-        <section className="panel document-panel">
-          <h3>等待新的轨迹</h3>
-          <p>
-            首次启用从当前位置开始。可添加项目直接编写
-            Wiki，或点击“导入已有历史”。
-          </p>
-        </section>
+        <>
+          {project && <ErrorMessage error="未找到这个项目，请重新选择。" />}
+          <div className="section-heading library-heading">
+            <div>
+              <h2>
+                我的项目{" "}
+                <span className="muted small">
+                  {snapshot.projects.length} 个项目
+                </span>
+              </h2>
+            </div>
+            {snapshot.projects.length > 0 && (
+              <input
+                className="search-input"
+                aria-label="搜索项目"
+                placeholder="搜索项目…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            )}
+          </div>
+          <div className="project-grid studio-projects">
+            {snapshot.projects
+              .filter((p) =>
+                `${p.name} ${p.path}`
+                  .toLowerCase()
+                  .includes(search.toLowerCase()),
+              )
+              .map((p, index) => (
+                <a
+                  className="panel workspace-project"
+                  key={p.id}
+                  href={href("manage", { project: p.id })}
+                >
+                  <div className="project-card-meta">
+                    <span>
+                      PROJECT / {(index + 1).toString().padStart(2, "0")}
+                    </span>
+                    <ArrowRight size={18} />
+                  </div>
+                  <div className="project-card-heading">
+                    <div>
+                      <h3>{p.name}</h3>
+                      <p className="muted" title={p.path}>
+                        {p.path}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="project-stats">
+                    <span>
+                      <strong>{p.raw.pending}</strong>待整理记录
+                    </span>
+                    <span>
+                      <strong>{p.wiki_pages}</strong>知识文档
+                    </span>
+                    <span>
+                      <strong>{p.skills.filter((s) => s.owned).length}</strong>
+                      项目 Skill
+                    </span>
+                  </div>
+                  <div className="project-card-footer">
+                    <span>
+                      {p.active_jobs
+                        ? `${p.active_jobs} 个操作进行中`
+                        : p.failed_jobs
+                          ? `${p.failed_jobs} 个操作失败，可查看执行记录`
+                          : p.wiki_pages
+                            ? "知识持续积累中"
+                            : "等待第一篇知识"}
+                    </span>
+                    <span>打开项目</span>
+                  </div>
+                </a>
+              ))}
+          </div>
+          {search &&
+            !snapshot.projects.some((p) =>
+              `${p.name} ${p.path}`
+                .toLowerCase()
+                .includes(search.toLowerCase()),
+            ) && <Empty title="没有匹配的项目">试试其他名称或路径。</Empty>}
+          <details
+            className="panel add-project"
+            open={!snapshot.projects.length ? true : undefined}
+          >
+            <summary>
+              <Plus size={17} /> 添加本地项目
+            </summary>
+            <p className="muted small">
+              填写项目的绝对路径。添加后即可编写知识文档；已有对话可在设置中导入。
+            </p>
+            <form
+              className="manage-actions"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void createAction.run(async () => {
+                  const result = await mutate<{ id: string }>("/api/projects", {
+                    path: path.trim(),
+                  });
+                  setPath("");
+                  setCreatedProject(result.id);
+                }, "项目已添加");
+              }}
+            >
+              <input
+                required
+                aria-label="项目目录"
+                placeholder="例如 /Users/you/projects/my-app"
+                value={path}
+                onChange={(e) => setPath(e.target.value)}
+              />
+              <button
+                className="primary"
+                disabled={createAction.busy || !path.trim()}
+              >
+                添加并打开
+              </button>
+            </form>
+            {createAction.status}
+          </details>
+        </>
       )}
+      {snapshot.projects.length > 0 && guide}
     </div>
   );
 }
@@ -355,13 +599,16 @@ function RawPanel({
   const action = useAction(refresh);
   return (
     <section className="panel document-panel">
-      <h2>Raw 原始轨迹</h2>
-      <p>
-        原文来自 Codex
-        实际写出的文件，未知事件和失败记录也会保留；加密或上游未写出的内容无法还原。
-      </p>
+      <div className="document-heading">
+        <h2>原始记录</h2>
+        <a href={href("manage", { project, layer: "wiki" })}>
+          查看整理后的知识 <ArrowRight size={14} />
+        </a>
+      </div>
+      <p>整理全部记录，或选择对话后勾选部分内容。</p>
       <div className="manage-actions">
         <button
+          className="primary"
           disabled={action.busy}
           onClick={() =>
             void action.run(
@@ -371,7 +618,7 @@ function RawPanel({
             )
           }
         >
-          整理待处理 Raw → Wiki
+          整理全部待处理记录
         </button>
         <button
           disabled={action.busy || !chosen.length}
@@ -391,21 +638,28 @@ function RawPanel({
           查看旧经验摘要
         </a>
       </div>
+      <a className="subdued-link" href={href("jobs", { project })}>
+        查看整理进度 →
+      </a>
       {action.status}
       <ErrorMessage error={turns.error} />
       <div className="manage-split">
         <div>
+          {turns.loading && !turns.data && <Loading />}
           {turns.data?.items.map((t) => (
             <button
               className="manage-row"
               key={t.id}
+              aria-pressed={turn === t.id}
               onClick={() => {
                 setTurn(t.id);
                 setRecordOffset(0);
               }}
             >
               <strong>
-                {t.turn_key === "unassigned" ? "未归属轮次的记录" : t.turn_key}
+                {t.turn_key === "unassigned"
+                  ? "未归属轮次的记录"
+                  : `对话轮次 #${t.id}`}
               </strong>
               <span>
                 {t.session} · {t.ended ? "已结束" : "未结束"} · {t.records} 条 /{" "}
@@ -413,7 +667,7 @@ function RawPanel({
               </span>
             </button>
           ))}
-          {!turns.data?.items.length && (
+          {turns.data && !turns.data.items.length && (
             <p>暂无轨迹。新内容将在后台下一次扫描后显示。</p>
           )}
           <Pagination
@@ -424,6 +678,38 @@ function RawPanel({
           />
         </div>
         <div>
+          {turn === null && (
+            <Empty title="选择一个对话轮次">
+              在左侧选择记录，查看原文或勾选要整理的内容。
+            </Empty>
+          )}
+          {records.loading && !records.data && <Loading />}
+          {records.data && !records.data.items.length && (
+            <Empty title="此轮次没有记录" />
+          )}
+          {records.data && records.data.items.some((r) => !r.consumed_by) && (
+            <div className="manage-actions">
+              <button
+                onClick={() =>
+                  setChosen(
+                    Array.from(
+                      new Set([
+                        ...chosen,
+                        ...records
+                          .data!.items.filter((r) => !r.consumed_by)
+                          .map((r) => r.id),
+                      ]),
+                    ),
+                  )
+                }
+              >
+                选中本页待处理记录
+              </button>
+              <button disabled={!chosen.length} onClick={() => setChosen([])}>
+                清空选择（{chosen.length}）
+              </button>
+            </div>
+          )}
           <ErrorMessage error={records.error} />
           {records.data?.items.map((r) => (
             <article key={r.id} className="trace-record">
@@ -494,18 +780,37 @@ function Pagination({
 }
 
 function WikiPanel({
+  initialName,
   project,
   revision,
   refresh,
 }: {
+  initialName?: string;
   project: string;
   revision: number;
   refresh: () => void;
 }) {
   const [offset, setOffset] = useState(0),
-    [name, setName] = useState<string | null>(null);
+    [name, setName] = useState<string | null>(initialName || null);
+  const [newEditor, setNewEditor] = useState(0);
+  useEffect(() => setName(initialName || null), [initialName]);
+  const openWiki = (nextName: string) => {
+    if (nextName !== "" && nextName === name) return;
+    if (!confirmDiscardChanges()) return;
+    if (nextName === "") setNewEditor((value) => value + 1);
+    setName(nextName);
+  };
+  const [selected, setSelected] = useState<string[]>([]);
+  const [generation, setGeneration] = useState<{
+    pages: string[];
+    id: number;
+  } | null>(null);
+  const generationSequence = useRef(0);
+  const openGeneration = (pages: string[]) =>
+    setGeneration({ pages, id: ++generationSequence.current });
+  const [search, setSearch] = useState("");
   const list = useResource<Page<{ name: string; excerpt: string }>>(
-    `/api/projects/${project}/wiki?offset=${offset}`,
+    `/api/projects/${project}/wiki${query({ offset, q: search })}`,
     revision,
   );
   const detail = useResource<Wiki>(
@@ -514,20 +819,88 @@ function WikiPanel({
   );
   return (
     <section className="panel document-panel">
-      <h2>Wiki 知识页</h2>
-      <button onClick={() => setName("")}>新建知识页</button>
+      <div className="document-heading">
+        <h2>知识文档</h2>
+        <button className="primary" onClick={() => openWiki("")}>
+          ＋ 新建知识页
+        </button>
+      </div>
+      <p className="muted small">
+        将项目做法整理成 Markdown 文档，保存后可用于生成 Skill。
+      </p>
+      <WikiSearch
+        value={search}
+        onSearch={(value) => {
+          setSearch(value);
+          setOffset(0);
+        }}
+      />
+      <div className="manage-actions">
+        <button
+          disabled={!selected.length}
+          onClick={() => openGeneration([...selected])}
+        >
+          从选定 Wiki 生成 Skill（{selected.length}）
+        </button>
+        <button
+          disabled={!list.data?.items.length}
+          onClick={() =>
+            setSelected((old) => [
+              ...new Set([...old, ...list.data!.items.map((p) => p.name)]),
+            ])
+          }
+        >
+          选择本页 Wiki
+        </button>
+        <button disabled={!selected.length} onClick={() => setSelected([])}>
+          清空 Wiki 选择
+        </button>
+      </div>
+      {generation && (
+        <SkillGeneration
+          key={generation.id}
+          project={project}
+          pages={generation.pages}
+          close={() => setGeneration(null)}
+          refresh={refresh}
+        />
+      )}
+      <WikiTransfer key={project} project={project} selected={selected} refresh={refresh} />
       <ErrorMessage error={list.error} />
       <div className="manage-split">
         <div>
+          {list.loading && !list.data && <Loading />}
+          {!list.error && list.data && !list.data.items.length && (
+            <Empty title={search ? "没有匹配的 Wiki" : "还没有知识文档"}>
+              {search
+                ? "试试其他名称或正文内容，或清空搜索查看全部文档。"
+                : "从原始记录整理，或点击“新建知识页”开始编写。"}
+            </Empty>
+          )}
           {list.data?.items.map((p) => (
-            <button
-              className="manage-row"
-              key={p.name}
-              onClick={() => setName(p.name)}
-            >
-              <strong>{p.name}</strong>
-              <span>{p.excerpt}</span>
-            </button>
+            <div className="wiki-selection-row" key={p.name}>
+              <input
+                type="checkbox"
+                aria-label={`选择 Wiki ${p.name}`}
+                checked={selected.includes(p.name)}
+                onChange={(e) =>
+                  setSelected((old) =>
+                    e.target.checked
+                      ? [...old, p.name]
+                      : old.filter((n) => n !== p.name),
+                  )
+                }
+              />
+              <button
+                className="manage-row"
+                aria-label={`打开 Wiki ${p.name}`}
+                aria-pressed={name === p.name}
+                onClick={() => openWiki(p.name)}
+              >
+                <strong>{p.name}</strong>
+                <span>{p.excerpt}</span>
+              </button>
+            </div>
           ))}
           <Pagination
             offset={offset}
@@ -538,14 +911,26 @@ function WikiPanel({
         </div>
         <div>
           <ErrorMessage error={detail.error} />
+          {name === null && (
+            <Empty title="选择一篇知识文档">
+              从左侧打开文档，阅读和编辑内容。
+            </Empty>
+          )}
+          {detail.loading && !detail.data && <Loading />}
           {name === "" ? (
-            <WikiEditor key="new" project={project} refresh={refresh} />
+            <WikiEditor
+              key={`new-${newEditor}`}
+              project={project}
+              refresh={refresh}
+              onGenerate={(name) => openGeneration([name])}
+            />
           ) : (
             detail.data && (
               <WikiEditor
                 key={detail.data.name}
                 project={project}
                 initial={detail.data}
+                onGenerate={(name) => openGeneration([name])}
                 refresh={refresh}
               />
             )
@@ -560,15 +945,21 @@ function WikiEditor({
   project,
   initial,
   refresh,
+  onGenerate,
 }: {
   project: string;
   initial?: Wiki;
   refresh: () => void;
+  onGenerate: (name: string) => void;
 }) {
   const [name, setName] = useState(initial?.name || ""),
     [body, setBody] = useState(initial?.body || "");
   const [expected, setExpected] = useState(initial?.digest || null);
+  const [savedBody, setSavedBody] = useState(initial?.body || "");
+  const [savedName, setSavedName] = useState(initial?.name || "");
   const action = useAction(refresh);
+  const dirty = name !== savedName || body !== savedBody;
+  useUnsavedChanges(dirty || action.busy);
   return (
     <>
       <form
@@ -581,11 +972,15 @@ function WikiEditor({
               { pages: [{ name, body }], expected: { [name]: expected } },
               "PUT",
             );
-            const response = await fetch(
+            const saved = await request<Wiki>(
               `/api/projects/${project}/wiki/${encodeURIComponent(name)}`,
             );
-            const saved: Wiki = await response.json();
+            if (saved.body !== body) {
+              throw new Error("保存后正文已发生变化。已保留当前输入，请重新打开文档后核对。");
+            }
             setExpected(saved.digest);
+            setSavedBody(saved.body);
+            setSavedName(name);
           }, "Wiki 已保存");
         }}
       >
@@ -594,13 +989,19 @@ function WikiEditor({
           <input
             required
             pattern="[a-z0-9][a-z0-9-]{0,100}"
-            disabled={!!initial}
+            disabled={expected !== null || action.busy}
+            placeholder="例如 build-and-test"
+            title="使用小写字母、数字或连字符，以字母或数字开头，最长 101 个字符"
+            aria-describedby="wiki-name-hint"
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
         </label>
+        <p id="wiki-name-hint" className="muted small">
+          名称使用小写字母、数字或连字符，例如 build-and-test。保存后名称固定。
+        </p>
         <label>
-          正文
+          正文（Markdown）
           <textarea
             required
             rows={14}
@@ -608,48 +1009,31 @@ function WikiEditor({
             onChange={(e) => setBody(e.target.value)}
           />
         </label>
-        <button disabled={action.busy}>保存 Wiki</button>
+        <button className="primary" disabled={action.busy}>
+          {action.busy ? "正在保存…" : "保存 Wiki"}
+        </button>
       </form>
       {action.status}
+      {dirty && <p className="muted small" role="status">有未保存的修改</p>}
       <details>
         <summary>正文预览</summary>
         <Markdown text={body} />
       </details>
-      {initial && (
-        <>
-          <h3>历史版本与回退</h3>
-          <a
-            href={href("knowledge", {
-              project,
-              wiki: initial.name,
-              layer: "wiki",
-            })}
+      {expected !== null && (
+        <div className="manage-actions">
+          <button
+            disabled={action.busy || body !== savedBody}
+            onClick={() => onGenerate(name)}
           >
-            查看全部历史与版本差异
+            从此 Wiki 生成 Skill
+          </button>
+          {body !== savedBody && (
+            <span className="muted small">请先保存正文，再生成 Skill。</span>
+          )}
+          <a href={href("knowledge", { project, wiki: name, layer: "wiki" })}>
+            查看历史与恢复版本
           </a>
-          {initial.changes.items.map((c) => (
-            <details key={c.id}>
-              <summary>正文版本 #{c.id}</summary>
-              <pre className="code-block">{c.diff}</pre>
-              <Markdown text={c.body} />
-              <button
-                disabled={action.busy}
-                onClick={() =>
-                  void action.run(
-                    () =>
-                      mutate(`/api/projects/${project}/wiki/rollback`, {
-                        change_id: c.id,
-                        expected: initial.digest,
-                      }),
-                    "已回退，保存为新正文版本",
-                  )
-                }
-              >
-                回退到此正文
-              </button>
-            </details>
-          ))}
-        </>
+        </div>
       )}
     </>
   );
@@ -666,6 +1050,20 @@ function SkillPanel({
 }) {
   return (
     <>
+      <div className="notice">
+        <Check size={18} />
+        <span>
+          在此查看和安装已有 Skill。生成新内容请前往知识文档选择 Wiki。
+        </span>
+      </div>
+      {!project.skills.some((s) => s.owned) && (
+        <Empty title="此项目暂无 Skill">
+          请先在知识文档中选择 Wiki 生成 Skill。
+          <a href={href("manage", { project: project.id, layer: "wiki" })}>
+            前往知识文档 →
+          </a>
+        </Empty>
+      )}
       {project.skills
         .filter((s) => s.owned)
         .map((s) => (
@@ -679,73 +1077,6 @@ function SkillPanel({
           />
         ))}
     </>
-  );
-}
-
-function WikiInputs({
-  project,
-  skill,
-  revision,
-  refresh,
-}: {
-  project: string;
-  skill: string;
-  revision: number;
-  refresh: () => void;
-}) {
-  const [offset, setOffset] = useState(0),
-    [selected, setSelected] = useState<number[]>([]);
-  const list = useResource<Page<{ id: number; name: string; excerpt: string }>>(
-    `/api/projects/${project}/wiki-inputs?skill=${skill}&offset=${offset}`,
-    revision,
-  );
-  const action = useAction(refresh);
-  return (
-    <details>
-      <summary>选择待处理 Wiki 版本</summary>
-      <ErrorMessage error={list.error} />
-      {list.data?.items.map((item) => (
-        <label className="manage-row" key={item.id}>
-          <span>
-            <input
-              type="checkbox"
-              checked={selected.includes(item.id)}
-              onChange={(e) =>
-                setSelected(
-                  e.target.checked
-                    ? [...selected, item.id]
-                    : selected.filter((id) => id !== item.id),
-                )
-              }
-            />
-            {item.name} · #{item.id}
-          </span>
-          <span>{item.excerpt}</span>
-        </label>
-      ))}
-      <Pagination
-        offset={offset}
-        next={list.data?.next_offset}
-        size={20}
-        set={setOffset}
-      />
-      <button
-        disabled={action.busy || !selected.length}
-        onClick={() =>
-          void action.run(async () => {
-            await mutate(`/api/projects/${project}/convert`, {
-              stage: "skill",
-              skill,
-              inputs: selected,
-            });
-            setSelected([]);
-          }, "选定 Wiki 版本已入队")
-        }
-      >
-        从选定版本生成 Skill
-      </button>
-      {action.status}
-    </details>
   );
 }
 
@@ -774,21 +1105,12 @@ function SkillActions({
       <p>生成结果保存在数据目录；点击安装后才复制到 Codex。</p>
       <div className="manage-actions">
         <button
-          disabled={action.busy}
-          onClick={() =>
-            void action.run(
-              () =>
-                mutate(`/api/projects/${project}/convert`, {
-                  stage: "skill",
-                  skill,
-                }),
-              "Skill 生成批次已创建",
-            )
+          className="primary"
+          title={
+            !detail.data?.disk_text
+              ? "请先在知识文档中生成 Skill，再安装"
+              : undefined
           }
-        >
-          Wiki → Skill
-        </button>
-        <button
           disabled={action.busy || !detail.data?.disk_text}
           onClick={() =>
             void action.run(
@@ -814,6 +1136,7 @@ function SkillActions({
         >
           安装到 Codex
         </button>
+        <a href={href("jobs", { project })}>查看生成进度 →</a>
         <a href={href("skills", { skill, project })}>完整历史与资源差异</a>
       </div>
       {action.status}
@@ -859,35 +1182,6 @@ function SkillActions({
           <button onClick={() => setPreview(null)}>取消</button>
         </div>
       )}
-      <WikiInputs
-        project={project}
-        skill={skill}
-        revision={revision}
-        refresh={refresh}
-      />
-      <h3>版本回退</h3>
-      {detail.data?.versions.items.map((v) => (
-        <div className="manage-actions" key={v.id}>
-          <a href={href("skills", { skill, version: v.id, project })}>
-            {new Date(v.created * 1000).toLocaleString()} · 查看差异
-          </a>
-          <button
-            disabled={action.busy}
-            onClick={() =>
-              void action.run(
-                () =>
-                  mutate(`/api/skills/${skill}/rollback`, {
-                    version_id: v.id,
-                    side: "after",
-                  }),
-                "数据目录已回退；需要同步到 Codex 时请重新安装",
-              )
-            }
-          >
-            恢复此版本
-          </button>
-        </div>
-      ))}
     </section>
   );
 }

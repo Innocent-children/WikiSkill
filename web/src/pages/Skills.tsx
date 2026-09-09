@@ -1,4 +1,4 @@
-import { useAction } from "./Manage";
+import { useAction } from "../actions";
 import { useEffect, useState } from "react";
 import {
   ArrowDownToLine,
@@ -32,6 +32,21 @@ export function Skills({
   snapshot: Snapshot;
   revision: number;
 }) {
+  const [searchText, setSearchText] = useState(route.q || "");
+  useEffect(() => {
+    setSearchText(route.q || "");
+  }, [route.q, route.status, route.source, route.project, route.skill]);
+  const status = ["enabled", "disabled", "unconfirmed"].includes(
+    route.status || "",
+  )
+    ? route.status
+    : "";
+  const source = ["owned", "external"].includes(route.source || "")
+    ? route.source
+    : "";
+  const listParams = { project: route.project, q: route.q, status, source };
+  const change = (changes: Partial<Route>) =>
+    navigate("skills", { ...listParams, ...changes });
   const projects = route.project
     ? snapshot.projects.filter((p) => p.id === route.project)
     : snapshot.projects;
@@ -41,49 +56,136 @@ export function Skills({
   );
   if (route.skill)
     return <SkillPage key={route.skill} route={route} revision={revision} />;
+  const keyword = (route.q || "").trim().toLowerCase();
+  const matches = [...skills.values()].filter((skill) => {
+    const matchesText =
+      skill.name.toLowerCase().includes(keyword) ||
+      skill.path.toLowerCase().includes(keyword);
+    const matchesStatus =
+      !status ||
+      (status === "enabled" && skill.enabled === true) ||
+      (status === "disabled" && skill.enabled === false) ||
+      (status === "unconfirmed" && skill.enabled === null);
+    const matchesSource =
+      !source || (source === "owned" ? !!skill.owned : !skill.owned);
+    return matchesText && matchesStatus && matchesSource;
+  });
   return (
-    <div className="project-grid">
-      {[...skills.values()].map((skill) => (
-        <a
-          className="panel skill-card"
-          key={skill.id}
-          href={href("skills", { project: route.project, skill: skill.id })}
+    <>
+      <form
+        className="toolbar"
+        role="search"
+        aria-label="Skill 搜索与筛选"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setSearchText(searchText.trim());
+          change({ q: searchText.trim() });
+        }}
+      >
+        <label>
+          搜索 Skill
+          <input
+            type="search"
+            placeholder="名称或路径"
+            value={searchText}
+            onChange={(event) => setSearchText(event.target.value)}
+          />
+        </label>
+        <button type="submit">搜索</button>
+        <label>
+          管理状态
+          <select
+            value={status}
+            onChange={(event) => change({ status: event.target.value })}
+          >
+            <option value="">全部</option>
+            <option value="enabled">开启</option>
+            <option value="disabled">关闭</option>
+            <option value="unconfirmed">配置待确认</option>
+          </select>
+        </label>
+        <label>
+          来源
+          <select
+            value={source}
+            onChange={(event) => change({ source: event.target.value })}
+          >
+            <option value="">全部</option>
+            <option value="owned">WikiSkill 生成</option>
+            <option value="external">外部</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          disabled={!searchText && !route.q && !route.status && !route.source}
+          onClick={() => {
+            setSearchText("");
+            navigate("skills", { project: route.project });
+          }}
         >
-          <div className="skill-card-top">
-            <span className="folder-mark">
-              <FileDiff size={23} />
-            </span>
-            <Badge
-              tone={
-                skill.enabled
-                  ? "green"
-                  : skill.enabled === false
-                    ? "neutral"
-                    : "amber"
-              }
+          清空筛选
+        </button>
+      </form>
+      <p className="muted" role="status" aria-live="polite">
+        匹配 {matches.length} 个 Skill · 当前项目范围共 {skills.size} 个
+      </p>
+      {!skills.size ? (
+        <div className="panel">
+          <Empty title="尚无 Skill">
+            当前项目范围还没有关联的 Skill，可在知识工作台选择 Wiki 生成。
+          </Empty>
+        </div>
+      ) : !matches.length ? (
+        <div className="panel">
+          <Empty title="没有匹配结果">
+            请调整搜索、管理状态或来源，也可以清空筛选。
+          </Empty>
+        </div>
+      ) : (
+        <div className="project-grid">
+          {matches.map((skill) => (
+            <a
+              className="panel skill-card"
+              key={skill.id}
+              href={href("skills", { ...listParams, skill: skill.id })}
             >
-              {skill.enabled
-                ? "管理已开启"
-                : skill.enabled === false
-                  ? "管理已关闭"
-                  : "配置待确认"}
-            </Badge>
-          </div>
-          <h3>{skill.name}</h3>
-          <p className="muted path">{skill.path}</p>
-          <div className="skill-card-footer">
-            <span>
-              {skill.owned ? "WikiSkill 生成" : "外部 Skill"} ·{" "}
-              {skill.project_count} 个关联项目
-            </span>
-            <span>
-              {skill.version_count} 个版本
-              <ArrowRight size={14} />
-            </span>
-          </div>
-        </a>
-      ))}
-    </div>
+              <div className="skill-card-top">
+                <span className="folder-mark">
+                  <FileDiff size={23} />
+                </span>
+                <Badge
+                  tone={
+                    skill.enabled
+                      ? "green"
+                      : skill.enabled === false
+                        ? "neutral"
+                        : "amber"
+                  }
+                >
+                  {skill.enabled
+                    ? "管理已开启"
+                    : skill.enabled === false
+                      ? "管理已关闭"
+                      : "配置待确认"}
+                </Badge>
+              </div>
+              <h3>{skill.name}</h3>
+              <p className="muted path">{skill.path}</p>
+              <div className="skill-card-footer">
+                <span>
+                  {skill.owned ? "WikiSkill 生成" : "外部 Skill"} ·{" "}
+                  {skill.project_count} 个关联项目
+                </span>
+                <span>
+                  {skill.version_count} 个版本
+                  <ArrowRight size={14} />
+                </span>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -115,7 +217,16 @@ export function SkillPage({
   const data = skill.data;
   return (
     <>
-      <Back to={href("skills", { project: route.project })}>全部 Skill</Back>
+      <Back
+        to={href("skills", {
+          project: route.project,
+          q: route.q,
+          status: route.status,
+          source: route.source,
+        })}
+      >
+        全部 Skill
+      </Back>
       <ErrorMessage error={skill.error} />
       {action.status}
       {selected && skill.data?.enabled && (
@@ -200,7 +311,7 @@ export function SkillPage({
                     <Markdown text={data.disk_text ?? data.published_text!} />
                   ) : (
                     <Empty title="Skill 正文尚未生成">
-                      Wiki 内容达到阈值后会生成项目 Skill。
+                      在知识工作台选择 Wiki，即可新建或合并 Skill。
                     </Empty>
                   )}
                 </>
@@ -319,6 +430,9 @@ export function SkillPage({
                         setTab("diff");
                         navigate("skills", {
                           project: route.project,
+                          q: route.q,
+                          status: route.status,
+                          source: route.source,
                           skill: data.id,
                           version: item.id,
                         });

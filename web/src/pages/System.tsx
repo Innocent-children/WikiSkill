@@ -4,14 +4,49 @@ import { elapsed, short, time } from "../presentation";
 import { ErrorMessage, Fields } from "../components";
 import type { Snapshot } from "../types";
 import { Settings } from "./Manage";
+import { useAction } from "../actions";
+import { mutate } from "../api";
 
 export function System({ snapshot, now }: { snapshot: Snapshot; now: number }) {
   const worker = snapshot.worker;
   const config = snapshot.config;
+  const action = useAction();
   return (
-    <div className="system-grid">
+    <div className="settings-layout">
       <Settings />
       <section className="panel document-panel">
+        <h2>数据接入与后台</h2>
+        <p className="muted">
+          导入本机已有对话；后台负责采集新记录和执行生成。
+        </p>
+        <div className="manage-actions">
+          <button
+            disabled={action.busy}
+            onClick={() =>
+              void action.run(
+                () => mutate("/api/history-import"),
+                "已请求导入本机历史，对应项目和记录将在扫描后出现。",
+              )
+            }
+          >
+            导入已有历史
+          </button>
+          <button
+            disabled={action.busy || worker.status === "online"}
+            onClick={() =>
+              void action.run(
+                () => mutate("/api/start"),
+                "已请求启动后台，连接状态会自动更新。",
+              )
+            }
+          >
+            {worker.status === "online" ? "后台运行中" : "启动后台"}
+          </button>
+        </div>
+        {action.status}
+      </section>
+      <details className="panel document-panel runtime-details">
+        <summary>后台运行信息</summary>
         <div className="eyebrow">RUNTIME</div>
         <h2>后台进程</h2>
         <Fields
@@ -53,28 +88,9 @@ export function System({ snapshot, now }: { snapshot: Snapshot; now: number }) {
           </p>
         )}
         <ErrorMessage error={worker.error || null} />
-      </section>
-      <section className="panel document-panel">
-        <div className="eyebrow">CONFIGURATION</div>
-        <h2>当前配置</h2>
-        {config ? (
-          <Fields
-            items={[
-              ["Raw 阈值", `${config.raw_threshold} 个已结束轮次`],
-              ["Wiki 阈值", `${config.wiki_threshold} 个正文版本`],
-              ["调度检查间隔", `${config.poll_seconds} 秒`],
-              ["模型超时", `${config.timeout_seconds} 秒`],
-              ["模型", config.model || "继承 Codex 默认模型"],
-              ["自动启动", config.auto_start ? "开启" : "关闭"],
-              ["Raw 自动转换", config.raw_auto ? "开启" : "关闭"],
-              ["Wiki 自动转换", config.wiki_auto ? "开启" : "关闭"],
-            ]}
-          />
-        ) : (
-          <ErrorMessage error={snapshot.config_error} />
-        )}
-      </section>
-      <section className="panel document-panel system-storage">
+      </details>
+      <details className="panel document-panel runtime-details">
+        <summary>本地数据与文件位置</summary>
         <div className="eyebrow">LOCAL STORAGE</div>
         <h2>本地数据</h2>
         <Fields
@@ -94,7 +110,7 @@ export function System({ snapshot, now }: { snapshot: Snapshot; now: number }) {
             ],
           ]}
         />
-      </section>
+      </details>
     </div>
   );
 }

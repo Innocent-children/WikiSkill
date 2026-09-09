@@ -11,7 +11,7 @@ class ApiSession:
 
     def __init__(self, config):
         self.client = create_model(ModelConfig(base_url=config.api_url, model=config.api_model,
-            api_key_env="", provider=config.api_provider, timeout_seconds=config.timeout_seconds), api_key=config.api_key)
+            api_key_env="", provider=config.api_provider, max_tokens=config.max_tokens, timeout_seconds=config.timeout_seconds), api_key=config.api_key)
 
     def __enter__(self):
         return self

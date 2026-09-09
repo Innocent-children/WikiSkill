@@ -35,7 +35,7 @@ class ApiModelTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 runtime = Runtime(Config(root / "data", executor="api", api_url=f"http://127.0.0.1:{server.server_port}/v1",
-                    api_model="fixture", api_key="test-secret", raw_auto=True, wiki_auto=True, raw_threshold=1, wiki_threshold=1, auto_start=False))
+                    api_model="fixture", api_key="test-secret", max_tokens=500000, context_window=1, raw_auto=True, wiki_auto=True, raw_threshold=1, wiki_threshold=1, auto_start=False))
                 key = runtime.store.project(str(root))
                 seed_record(runtime, key)
                 self.assertEqual(runtime.drain(), 2)
@@ -44,6 +44,8 @@ class ApiModelTests(unittest.TestCase):
                 self.assertTrue(all(j["thread_id"] is None for j in jobs))
                 self.assertNotIn("test-secret", json.dumps(jobs))
                 self.assertNotIn("test-secret", json.dumps(runtime.store.rows("SELECT * FROM job_execution")))
+                self.assertTrue(all(x[2]["max_tokens"] == 500000 for x in captured))
+                self.assertTrue(all("context_window" not in x[2] for x in captured))
                 self.assertEqual([x[1] for x in captured], ["Bearer test-secret"] * 2)
         finally:
             server.shutdown(); server.server_close(); thread.join()

@@ -1,4 +1,5 @@
-import { useAction } from "./Manage";
+import { useAction } from "../actions";
+import { WikiSearch } from "../WikiSearch";
 import { useState } from "react";
 import { ArrowRight, BookOpen, FileText } from "lucide-react";
 import { mutate, useResource } from "../api";
@@ -62,8 +63,9 @@ export function KnowledgeList({
 }) {
   const layer = route.layer === "wiki" ? "wiki" : "raw";
   const offset = Math.max(0, Number(route.offset) || 0);
+  const search = layer === "wiki" ? route.q || "" : "";
   const result = useResource<Page<Raw | Wiki>>(
-    `/api/projects/${encodeURIComponent(route.project!)}/${layer}${query({ offset })}`,
+    `/api/projects/${encodeURIComponent(route.project!)}/${layer}${query({ offset, q: search })}`,
     revision,
   );
   return (
@@ -78,6 +80,15 @@ export function KnowledgeList({
           navigate("knowledge", { project: route.project, layer })
         }
       />
+      {layer === "wiki" && (
+        <WikiSearch
+          key={route.project}
+          value={search}
+          onSearch={(q) =>
+            navigate("knowledge", { project: route.project, layer, q })
+          }
+        />
+      )}
       <ErrorMessage error={result.error} />
       {result.data?.items.length ? (
         <div className="document-list">
@@ -130,14 +141,22 @@ export function KnowledgeList({
         </div>
       ) : result.loading ? (
         <Loading />
-      ) : (
+      ) : search && result.error ? null : (
         <div className="panel">
           <Empty
-            title={layer === "raw" ? "还没有旧经验摘要" : "还没有知识页面"}
+            title={
+              search
+                ? "没有匹配的 Wiki"
+                : layer === "raw"
+                  ? "还没有旧经验摘要"
+                  : "还没有知识页面"
+            }
           >
-            {layer === "raw"
-              ? "在 Codex 任务中提交可复用经验后，这里会保留原始内容。"
-              : "原始经验达到阈值并处理完成后，可以在这里查看整理结果。"}
+            {search
+              ? "试试其他名称或正文内容，或清空搜索查看全部文档。"
+              : layer === "raw"
+                ? "在 Codex 任务中提交可复用经验后，这里会保留原始内容。"
+                : "原始经验达到阈值并处理完成后，可以在这里查看整理结果。"}
           </Empty>
         </div>
       )}
@@ -150,6 +169,7 @@ export function KnowledgeList({
               project: route.project,
               layer,
               offset: String(offset),
+              q: search,
             })
           }
         />
@@ -285,6 +305,9 @@ export function WikiPage({
             <div>
               <div className="eyebrow">WIKI</div>
               <h2>{wiki.data.name}</h2>
+              <a href={href("manage", { project, layer: "wiki", wiki: name })}>
+                打开 Wiki：编辑或生成 Skill →
+              </a>
               <code>{short(wiki.data.digest)}</code>
             </div>
           </div>

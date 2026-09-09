@@ -197,9 +197,7 @@ export function Overview({
               ).map((skill) => (
                 <QueueMeter
                   key={skill.id}
-                  label={
-                    skill.owned ? "Wiki → 项目 Skill" : `Wiki → ${skill.name}`
-                  }
+                  label={`Wiki → ${skill.name}`}
                   queue={skill.wiki}
                   project={project.id}
                   skill={skill.id}

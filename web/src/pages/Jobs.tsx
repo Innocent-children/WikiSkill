@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ArrowDownToLine, ArrowRight, CircleAlert, Check } from "lucide-react";
 import { mutate, useResource } from "../api";
-import { useAction } from "./Manage";
+import { useAction } from "../actions";
 import { href, navigate, type Route } from "../routing";
 import {
   contentNames,
@@ -169,7 +169,7 @@ export function JobDetail({
             {data.project_name} ·{" "}
             {data.stage === "raw" ? "RAW → WIKI" : "WIKI → SKILL"}
           </div>
-          <h2>{data.stage === "raw" ? "整理项目经验" : "更新项目 Skill"}</h2>
+          <h2>{data.stage === "raw" ? "整理项目经验" : "生成 Skill"}</h2>
           <code>{data.id}</code>
         </div>
         <Badge

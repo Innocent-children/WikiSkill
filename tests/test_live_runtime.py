@@ -247,6 +247,12 @@ for line in sys.stdin:
         jobs = self.runtime.store.rows("SELECT * FROM jobs WHERE skill=?", (shared,))
         self.assertEqual(len(jobs), 1)
         self.runtime.drain()
+        self.assertEqual(len(self.runtime.store.rows("SELECT * FROM jobs WHERE skill=?", (shared,))), 1)
+        # Other projects explicitly select Wiki when updating this summary Skill.
+        self.runtime.enqueue(key2, "skill", skill=shared)
+        with self.assertRaises(ValueError):
+            self.runtime.enqueue(self.key, "skill", skill=shared)
+        self.runtime.drain()
         self.assertEqual(len(self.runtime.store.rows("SELECT * FROM jobs WHERE skill=?", (shared,))), 2)
 
 

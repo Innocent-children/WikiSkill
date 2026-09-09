@@ -34,15 +34,15 @@ def validate_pages(pages: list[dict]) -> None:
         names.add(page["name"])
 
 
-def write_pages(db, project: str, pages: list[dict], metadata: dict, job_id: str) -> int:
+def write_pages(db, project: str, pages: list[dict], metadata: dict, job_id: str, *, record_body_changes: bool = False) -> int:
     count = 0
     for page in pages:
         content_digest = digest(normalized(page["body"]))
-        current = db.execute("SELECT digest FROM wiki WHERE project=? AND name=?", (project, page["name"])).fetchone()
+        current = db.execute("SELECT digest,body FROM wiki WHERE project=? AND name=?", (project, page["name"])).fetchone()
         db.execute("INSERT INTO wiki VALUES(?,?,?,?,?) ON CONFLICT(project,name) DO UPDATE SET "
                    "body=excluded.body,digest=excluded.digest,metadata=excluded.metadata",
                    (project, page["name"], page["body"], content_digest, dumps(metadata)))
-        if current is None or current["digest"] != content_digest:
+        if current is None or current["digest"] != content_digest or (record_body_changes and current["body"] != page["body"]):
             count += db.execute("INSERT OR IGNORE INTO wiki_changes(project,name,digest,body,job_id) VALUES(?,?,?,?,?)",
                                 (project, page["name"], content_digest, page["body"], job_id)).rowcount
     if pages:
@@ -110,6 +110,9 @@ class Runtime:
                     created.append(self._enqueue(db, key, "raw", None, raw))
                 targets = db.execute("SELECT s.* FROM skills s JOIN project_skills p ON s.id=p.skill WHERE p.project=?", (key,)).fetchall()
                 for skill in targets:
+                    # Automatic consolidation updates the project's summary Skill.
+                    if Path(skill["path"]).name != f"wikiskill-{key}":
+                        continue
                     if not self.config.permits(Path(skill["path"]), bool(skill["owned"])):
                         continue
                     pending = [r["id"] for r in db.execute("SELECT id FROM wiki_changes w WHERE project=? AND NOT EXISTS "
@@ -152,29 +155,19 @@ class Runtime:
         return {"job_id": key, "state": "queued"}
 
     def _enqueue(self, db, project: str, stage: str, skill: str | None, inputs: list[int]) -> str:
-        # Bound each batch without truncating or consuming records left for the next batch.
-        table, field = ("trace_records", "original") if stage == "raw" else ("wiki_changes", "body")
-        selected, size = [], 0
-        for item in inputs:
-            length = db.execute(f"SELECT length({field}) FROM {table} WHERE id=?", (item,)).fetchone()[0]
-            if selected and size + length > self.config.input_budget // 2:
-                break
-            selected.append(item)
-            size += length
-        inputs = selected
         key = uuid.uuid4().hex
         db.execute("INSERT INTO jobs(id,project,stage,skill,state,inputs,created) VALUES(?,?,?,?,'queued',?,?)",
                    (key, project, stage, skill, dumps(inputs), time.time()))
-        settings = {k: getattr(self.config, k) for k in ("executor", "api_provider", "api_url", "api_model", "model", "input_budget")}
+        settings = {k: getattr(self.config, k) for k in ("executor", "api_provider", "api_url", "api_model", "model", "max_tokens", "context_window")}
         db.execute("INSERT INTO job_execution VALUES(?,?)", (key, dumps(settings)))
         Store.event(db, "job.queued", project=project, job_id=key, skill=skill, input_count=len(inputs))
         return key
 
     def _context(self, job: dict) -> dict:
         placeholders = ",".join("?" for _ in job["inputs"])
-        wiki = self.store.rows("SELECT name,body FROM wiki WHERE project=? ORDER BY name", (job["project"],))
-        context = {"project": job["project"], "wiki": wiki}
+        context = {"project": job["project"]}
         if job["stage"] == "raw":
+            context["wiki"] = self.store.rows("SELECT name,body FROM wiki WHERE project=? ORDER BY name", (job["project"],))
             rows = self.store.rows(f"SELECT id,original FROM trace_records WHERE id IN ({placeholders}) ORDER BY source,offset", job["inputs"])
             context["records"] = [{"id": r["id"], "original": r["original"].decode("utf-8", errors="replace")} for r in rows]
         else:
@@ -183,6 +176,7 @@ class Runtime:
             context.update(before_bundle=bundle, skill_md=skill_text(bundle),
                            suggested_name=Path(skill["path"]).name,
                            changes=self.store.rows(f"SELECT id,name,body FROM wiki_changes WHERE id IN ({placeholders}) ORDER BY id", job["inputs"]))
+            context["wiki"] = [{"name": p["name"], "body": p["body"]} for p in context["changes"]]
         return context
 
     def _apply(self, job: dict) -> dict:
@@ -196,6 +190,8 @@ class Runtime:
         else:
             before = job["context"]["before_bundle"]
             text = output["skill_md"]
+            if not skill_text(before) and text is None:
+                raise ValueError("模型未生成 Skill 正文，请在执行记录中重新生成")
             if text is not None and not isinstance(text, str):
                 raise ValueError("skill_md must be text or null")
             after = before if text is None or normalized(text) == normalized(skill_text(before)) else with_skill(before, text)
@@ -293,9 +289,6 @@ class Runtime:
                                 context = {k: v for k, v in job["context"].items() if k != "before_bundle"}
                                 if "before_bundle" in job["context"]:
                                     context["resource_inventory"] = list(job["context"]["before_bundle"])
-                                from .generation import generation_prompt
-                                if len(generation_prompt(job["stage"], context)) > config.input_budget:
-                                    raise ValueError("Input exceeds configured model budget; increase input_budget and regenerate. Raw remains intact.")
                                 result = session.generate(job["stage"], context)
                                 self.store.update_job(job_id, result=result, state="prepared")
                             self._apply(self.store.job(job_id))
@@ -355,7 +348,7 @@ class Runtime:
                         raise ValueError("A retained publication must be recovered before regenerating")
                     fields.update(context=None, result=None, thread_id=None)
                     with self.store.transaction() as db:
-                        settings = {k: getattr(self.config, k) for k in ("executor", "api_provider", "api_url", "api_model", "model", "input_budget")}
+                        settings = {k: getattr(self.config, k) for k in ("executor", "api_provider", "api_url", "api_model", "model", "max_tokens", "context_window")}
                         db.execute("INSERT OR REPLACE INTO job_execution VALUES(?,?)", (job_id, dumps(settings)))
                 self.store.update_job(job_id, event="job.retried", event_payload={"regenerate": regenerate}, **fields)
             else:

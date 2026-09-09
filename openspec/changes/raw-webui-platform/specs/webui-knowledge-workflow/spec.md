@@ -1,15 +1,15 @@
 ## ADDED Requirements
 
 ### Requirement: Manual and automatic transformations
-WebUI SHALL 提供项目 Raw→Wiki 与 Wiki→Skill 手动操作，允许选择待处理输入；设置页 SHALL 保留两项自动阈值及开关。Raw 阈值按未处理已结束轮次计数，包含中断轮次；Wiki 阈值按新增正文版本计数。手动操作 SHALL 不受阈值限制。
+WebUI SHALL 在原始记录页提供 Raw→Wiki，在 Wiki 列表与详情提供 Wiki→Skill 手动操作。Raw 选择待处理记录，Wiki 选择当前正文；设置页 SHALL 保留两项自动阈值及开关。Raw 阈值按未处理已结束轮次计数，包含中断轮次；Wiki 阈值按新增正文版本计数。手动操作 SHALL 不受阈值限制。
 
 #### Scenario: Fixed manual batch
 - **WHEN** 用户提交选定输入后又积累新内容
-- **THEN** 当前批次只处理提交时固定的输入，新内容留在待处理列表；重复提交不重复占用输入
+- **THEN** 当前批次只处理提交时固定的输入，新内容留待后续处理；Wiki 正文允许再次用于新建或更新 Skill，Raw 已处理记录不重复消费
 
 #### Scenario: Automatic thresholds
 - **WHEN** 对应自动开关开启且待处理数量达到阈值
-- **THEN** 创建与手动操作相同的批次；未开启或未达到阈值时不自动创建
+- **THEN** 创建自动批次；Wiki 自动转换仅更新所属项目的汇总 Skill。专题 Skill 与其他项目关联的 Skill 由用户手动选择 Wiki 更新；未开启或未达到阈值时不自动创建
 
 ### Requirement: Configurable execution
 设置页 SHALL 配置 API 协议、地址、模型名和密钥，或选择本机 Codex 新会话执行。两种执行方式 SHALL 共用输入、结果检查、持久化和本地报告，密钥 SHALL 不回显到页面读取接口、事件或报告。
@@ -45,3 +45,17 @@ MCP SHALL 保留直接写 Wiki；WebUI SHALL 支持新建、编辑、查看历�
 #### Scenario: Business-only distribution
 - **WHEN** 用户安装并运行 WikiSkill
 - **THEN** 文档与命令以自动采集、WebUI 知识管理和 Skill 生成为主，日常模型调用可用，实验命令退出
+
+### Requirement: Generate from selected current Wiki pages
+Wiki 列表 SHALL 支持单选、多选和跨页选择；详情 SHALL 支持从当前已保存正文生成。生成面板 SHALL 默认新建 Skill，提供可用名称，查找所有受管理项目的已有 Skill 并展示用途、匹配词、关联项目和正文。用户 SHALL 可明确选择合并到已有 Skill，合并保留已有用途与资源。已处理过的 Wiki SHALL 仍可选择。
+
+#### Scenario: New Skill or explicit merge
+- **WHEN** 用户选择一篇或多篇 Wiki 并打开生成面板
+- **THEN** 默认新建，候选按共同词排序并支持搜索；选择合并时更新目标 Skill，关联到当前项目，沿用发布与历史流程
+
+#### Scenario: Fixed complete selection
+- **WHEN** 用户提交生成
+- **THEN** 检查预览时的正文及合并目标内容是否仍有效，固定全部选定正文；发生变化或超过输入上限时明确拒绝，不静默截断选择
+
+### Requirement: Focused page responsibilities
+工作台各页 SHALL 分别负责原始记录整理、Wiki 编辑与生成、Skill 查看与安装；历史页 SHALL 负责差异、下载和恢复；执行记录 SHALL 负责进度和重试；设置 SHALL 负责配置、历史导入和后台启动。跨职责操作 SHALL 使用链接进入对应页面。

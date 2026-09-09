@@ -52,7 +52,8 @@ export type Config = {
   api_url: string;
   api_model: string;
   api_key_configured: boolean;
-  input_budget: number;
+  max_tokens: number;
+  context_window: number;
   model: string | null;
   timeout_seconds: number;
   poll_seconds: number;
@@ -169,6 +170,18 @@ export type WikiDetail = {
   digest: string;
   metadata: Record<string, unknown>;
   changes: Page<WikiChange>;
+};
+export type WikiImportPreview = {
+  preview_token: string;
+  counts: { added: number; modified: number; unchanged: number };
+  pages: {
+    name: string;
+    status: "added" | "modified" | "unchanged";
+    body: string;
+    before: string | null;
+    expected_digest: string | null;
+    diff: string;
+  }[];
 };
 export type VersionSummary = {
   id: string;

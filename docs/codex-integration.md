@@ -8,6 +8,34 @@ WebUI：`uv run --frozen wikiskill-codex web`。默认仅监听 `127.0.0.1:8765`
 
 `start` 请求启动后台；`worker --once` 执行当前可运行批次；`collector --once` 扫描一次轨迹。`auto_start=false` 时由用户自行运行 worker 和 collector。同一数据目录分别用进程锁保证唯一采集器和 worker。
 
+## 环境诊断
+
+```bash
+wikiskill-codex --root /absolute/data doctor
+wikiskill-codex --root /absolute/data doctor --json
+wikiskill-codex doctor --help
+```
+
+使用 uv 安装时，可在这些命令前加 `uv run --frozen`。`--root` 放在子命令前，省略时使用默认数据目录；`wikiskill` 支持相同用法。
+doctor 可在初始化前或配置损坏时独立运行。它只读取配置及文件元数据，不修改数据、不创建目录或数据库、不运行 Codex 命令、不启动后台、不调用模型或联网。uv 自身的环境同步属于启动工具的行为。
+
+检查包括数据目录的读写权限、`config.json` 的格式和权限、`state.sqlite3`、`skills`/`reports`/`locks`/`worker.log` 的路径类型及访问权限，以及 `codex_home`、其会话目录、`install_directory`。
+数据目录或配置缺失是错误，提示使用同一 `--root` 执行 `init`；配置无效时提示具体字段修复，或在备份配置后使用 `init --reset-settings` 恢复当前默认设置。
+运行文件和安装目录尚未生成、但父目录具备创建权限时仅提示；会话目录尚不存在也仅提示，可能还没有相应会话。
+已存在路径的类型或所需访问权限错误会阻止通过。所有建议都由用户自行执行。
+
+执行方式按当前配置检查：
+
+- `codex`：`codex_command` 首项必须能找到且可执行。相对命令路径、相对 PATH 项按数据目录解释，与实际启动 Codex 的工作目录一致。`model` 为 null 时使用 Codex 默认模型。
+- `api`：检查 API 协议、地址和端口格式，并要求填写 `api_model`。没有 Codex 命令只提示。`api_key` 只显示“已配置/未配置”；为空时提示需要认证的服务应填写 key，免认证服务可以留空。
+
+默认输出逐项列出状态及修复建议。JSON 输出包含 `ok`（布尔值）、`executor`（`codex`、`api`，无法读取有效配置时为 null）和 `checks` 数组。
+每个检查包含 `id`、`status`、`message`、`repair`；`status` 是 `ok`、`warning` 或 `error`，没有建议时 `repair` 为空字符串。
+出现任一 `error` 时 `ok=false` 且退出 `1`；只有 `ok`/`warning` 时退出 `0`。目录不可用时只返回能完成的检查，配置无效时省略依赖有效配置的检查。
+
+两种输出均使用固定提示，省略实际路径、URL、模型名、命令参数、配置原文及原始异常内容，避免输出密钥或含凭据地址。
+“通过”只表示本地检查未发现阻塞问题，不验证 Codex 登录、API 连接/认证、模型可用性或 SQLite 内容完整性。诊断中读取的权限也可能在之后发生变化。
+
 ## Raw
 
 原文逐行作为字节保存在 `trace_records.original`，来源、偏移和读取进度一起提交。索引在 `trace_sources`、`trace_turns`，原文页面可下载原始字节。默认跳过启用前正文；“导入已有历史”补读早期记录并按来源偏移去重。归档移动继续同一来源；截断或替换保留原记录并新建段。未完成行留到后续扫描。

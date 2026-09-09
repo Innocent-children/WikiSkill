@@ -42,7 +42,10 @@ async def event_stream(view: ReadView, request: Request):
 
 
 def create_app(root: str | Path = "~/.wikiskill") -> FastAPI:
+    from .wiki_transfer import WikiTransfer
+
     view = ReadView(root)
+    transfer = WikiTransfer(view)
     app = FastAPI(title="WikiSkill", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.view = view
 
@@ -125,6 +128,23 @@ def create_app(root: str | Path = "~/.wikiskill") -> FastAPI:
         current.wake()
         return result
 
+    @app.post("/api/projects/{project}/skill-generation/preview")
+    def skill_generation_preview(project: str, values: dict):
+        from .skill_generation import SkillGeneration
+        if set(values) != {"pages"}:
+            raise ValueError("Supply selected Wiki page names")
+        return SkillGeneration(runtime()).preview(project, **values)
+
+    @app.post("/api/projects/{project}/skill-generation")
+    def skill_generation(project: str, values: dict):
+        from .skill_generation import SkillGeneration
+        if set(values) - {"pages", "expected", "name", "skill", "skill_digest"} or not {"pages", "expected"} <= set(values):
+            raise ValueError("Supply selected Wiki pages, digests and a new name or merge target")
+        current = runtime()
+        result = SkillGeneration(current).enqueue(project, **values)
+        current.wake()
+        return result
+
     @app.put("/api/projects/{project}/wiki")
     def write_wiki(project: str, values: dict):
         if set(values) != {"pages", "expected"}:
@@ -135,6 +155,34 @@ def create_app(root: str | Path = "~/.wikiskill") -> FastAPI:
             raise KeyError("项目不存在")
         result = current.put_wiki(found[0]["path"], **values)
         current.wake()
+        return result
+
+    @app.get("/api/projects/{project}/wiki-export")
+    def export_wiki(project: str):
+        return Response(transfer.export(project), media_type="application/zip",
+                        headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote("wiki-" + project + ".zip", safe="")})
+
+    @app.post("/api/projects/{project}/wiki-export")
+    def export_selected_wiki(project: str, values: dict):
+        if set(values) != {"pages"} or not isinstance(values["pages"], list):
+            raise ValueError("请提供选定 Wiki 的 pages 列表")
+        return Response(transfer.export(project, values["pages"]), media_type="application/zip",
+                        headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote("wiki-" + project + "-selected.zip", safe="")})
+
+    @app.post("/api/projects/{project}/wiki-import/preview")
+    def preview_wiki_import(project: str, values: dict):
+        if set(values) != {"archive_base64"}:
+            raise ValueError("请提供 archive_base64 以预览 ZIP")
+        return transfer.preview(project, **values)
+
+    @app.post("/api/projects/{project}/wiki-import")
+    def import_wiki(project: str, values: dict):
+        if set(values) != {"archive_base64", "preview_token", "overwrite"}:
+            raise ValueError("请提供 ZIP、预览结果和同名修改确认列表")
+        current = runtime()
+        result = transfer.apply(current.store, project, **values)
+        if result["new_changes"]:
+            current.wake()
         return result
 
     @app.post("/api/projects/{project}/wiki/rollback")
@@ -249,8 +297,8 @@ def create_app(root: str | Path = "~/.wikiskill") -> FastAPI:
         return view.raw_item(project, raw_id)
 
     @app.get("/api/projects/{project}/wiki")
-    def wiki(project: str, offset: Offset = 0, limit: Limit = 20):
-        return view.wiki(project, offset, limit)
+    def wiki(project: str, offset: Offset = 0, limit: Limit = 20, q: str = ""):
+        return view.wiki(project, offset, limit, q)
 
     @app.get("/api/projects/{project}/wiki/{name}")
     def wiki_item(project: str, name: str, offset: Offset = 0, limit: Limit = 20):

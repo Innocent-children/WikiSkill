@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   ArrowRight,
   ChevronRight,
@@ -15,6 +15,7 @@ import {
   navigate,
   navigation,
   routeFromHash,
+  watchRoute,
   type Route,
 } from "./routing";
 import { time } from "./presentation";
@@ -31,11 +32,10 @@ export function App() {
   const [route, setRoute] = useState<Route>(routeFromHash);
   const [now, setNow] = useState(Date.now() / 1000);
   useEffect(() => {
-    const listener = () => setRoute(routeFromHash());
-    window.addEventListener("hashchange", listener);
+    const stopWatching = watchRoute(setRoute);
     const clock = setInterval(() => setNow(Date.now() / 1000), 1000);
     return () => {
-      window.removeEventListener("hashchange", listener);
+      stopWatching();
       clearInterval(clock);
     };
   }, []);
@@ -57,29 +57,36 @@ export function App() {
         跳到主要内容
       </a>
       <aside className="sidebar">
-        <a className="brand" href={href("overview")}>
+        <a className="brand" href={href("manage")}>
           <span className="brand-mark">
             <Layers3 size={23} strokeWidth={1.8} />
           </span>
           <div>
             <strong>WikiSkill</strong>
-            <span>本地工作台</span>
+            <span>个人知识工作室</span>
           </div>
         </a>
         <nav aria-label="主导航">
-          {navigation.map((item) => (
-            <a
-              key={item.id}
-              className={route.view === item.id ? "active" : ""}
-              href={href(item.id, { project: route.project })}
-              aria-current={route.view === item.id ? "page" : undefined}
-            >
-              <item.icon size={19} />
-              <span>{item.label}</span>
-              {item.id === "jobs" && !!snapshot?.totals.failed && (
-                <span className="nav-count">{snapshot.totals.failed}</span>
+          {navigation.map((item, index) => (
+            <Fragment key={item.id}>
+              {[0, 3].includes(index) && (
+                <span className="nav-group">
+                  {index === 0 ? "工作空间" : "资料与设置"}
+                </span>
               )}
-            </a>
+              <a
+                key={item.id}
+                className={route.view === item.id ? "active" : ""}
+                href={href(item.id, { project: route.project })}
+                aria-current={route.view === item.id ? "page" : undefined}
+              >
+                <item.icon size={19} />
+                <span>{item.label}</span>
+                {item.id === "jobs" && !!snapshot?.totals.failed && (
+                  <span className="nav-count">{snapshot.totals.failed}</span>
+                )}
+              </a>
+            </Fragment>
           ))}
         </nav>
         <div className="sidebar-bottom">
@@ -87,17 +94,17 @@ export function App() {
             <span className="status-dot" />
             LOCAL
           </span>
-          <span>Raw → Wiki → Skill</span>
+          <span>项目经验，持续积累。</span>
           <div className="sidebar-worker">
             <Server size={16} />
             <span>
               {snapshot?.worker.status === "online"
-                ? "Worker 在线"
+                ? "后台在线"
                 : snapshot?.worker.status === "stale"
-                  ? "Worker 心跳过期"
+                  ? "后台连接待确认"
                   : snapshot?.worker.status === "stopped"
-                    ? "Worker 已停止"
-                    : "Worker 心跳未记录"}
+                    ? "后台已停止"
+                    : "等待后台连接"}
             </span>
           </div>
         </div>
@@ -110,6 +117,35 @@ export function App() {
             <strong>{title}</strong>
           </div>
           <div className="topbar-actions">
+            {snapshot && route.view !== "system" && (
+              <label className="project-picker">
+                <Folder size={16} />
+                <select
+                  aria-label="选择项目"
+                  value={route.project || ""}
+                  onChange={(e) =>
+                    navigate(route.view, {
+                      project: e.target.value,
+                      layer: route.layer,
+                      ...(route.view === "skills"
+                        ? {
+                            q: route.q,
+                            status: route.status,
+                            source: route.source,
+                          }
+                        : {}),
+                    })
+                  }
+                >
+                  <option value="">全部项目</option>
+                  {snapshot.projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <span
               className={`connection ${live.connection === "connected" && !live.error ? "connected" : ""}`}
               role="status"
@@ -133,33 +169,16 @@ export function App() {
           </div>
         </header>
         <main id="main-content" className="main" tabIndex={-1}>
-          <div className="page-heading">
-            <div>
-              <div className="eyebrow">
-                {selectedProject ? selectedProject.name : "ALL PROJECTS"}
+          {route.view !== "manage" && (
+            <div className="page-heading">
+              <div>
+                <div className="eyebrow">
+                  {selectedProject ? selectedProject.name : "我的知识空间"}
+                </div>
+                <h1>{title}</h1>
               </div>
-              <h1>{title}</h1>
             </div>
-            {snapshot && (
-              <label className="project-picker">
-                <Folder size={16} />
-                <select
-                  aria-label="选择项目"
-                  value={route.project || ""}
-                  onChange={(e) =>
-                    navigate(route.view, { project: e.target.value })
-                  }
-                >
-                  <option value="">全部项目</option>
-                  {snapshot.projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-          </div>
+          )}
           <ErrorMessage error={live.error} />
           {live.connection === "reconnecting" && snapshot && (
             <div className="notice warning" role="status">
@@ -180,8 +199,8 @@ export function App() {
                 <CircleAlert size={18} />
                 <span>
                   {snapshot.worker.status === "stopped"
-                    ? "Worker 已停止。"
-                    : "Worker 心跳已过期。"}
+                    ? "后台已停止。"
+                    : "后台心跳已过期。"}
                   批次显示最后一次记录。
                 </span>
                 <a href={href("system", { project: route.project })}>
@@ -196,16 +215,18 @@ export function App() {
             <System snapshot={snapshot} now={now} />
           ) : route.view === "manage" ? (
             <Manage
+              wiki={route.wiki}
               snapshot={snapshot}
               revision={live.revision}
               refresh={live.refresh}
               project={route.project}
+              layer={route.layer}
             />
           ) : route.project && !selectedProject ? (
             <Empty title="项目不存在">
               <a href={href("overview")}>返回全部项目</a>
             </Empty>
-          ) : !snapshot.projects.length ? (
+          ) : !snapshot.projects.length && route.view !== "skills" ? (
             <div className="panel onboarding">
               <Empty
                 title={
