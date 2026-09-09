@@ -2,11 +2,13 @@
 
 ## 安装与启动
 
-运行 `uv sync --frozen`、`uv run --frozen wikiskill-codex init`。将输出的 `mcp_command` 注册为 Codex 本机 stdio MCP，重新连接后会请求启动采集器和转换 worker。`wikiskill` 与 `wikiskill-codex` 都使用同一业务 CLI。
+安装后运行 `wikiskill`，自动初始化并启动面板、采集器与转换 worker；从源码运行可用 `uv sync --frozen`、`uv run --frozen wikiskill`。`wikiskill` 与 `wikiskill-codex` 都使用同一 CLI。
 
-WebUI：`uv run --frozen wikiskill-codex web`。默认仅监听 `127.0.0.1:8765`。也可用 `--root /absolute/data` 指定隔离目录；MCP 和 WebUI 必须使用相同目录。
+需要 MCP 工具时，运行 `wikiskill init`，将输出的 `mcp_command` 注册为 Codex 本机 stdio MCP。重新连接后自动唤醒整套后台并复用已有实例，不打开浏览器。自动采集独立于 MCP 连接。也可用 `--root /absolute/data` 指定隔离目录；MCP 和 WebUI 必须使用相同目录。
 
-`start` 请求启动后台；`worker --once` 执行当前可运行批次；`collector --once` 扫描一次轨迹。`auto_start=false` 时由用户自行运行 worker 和 collector。同一数据目录分别用进程锁保证唯一采集器和 worker。
+`start` 启动整套后台但不打开浏览器；`status` 包含实际地址与运行状态；`stop` 停止托管后台并保留数据。`auto_start=false` 时，仍可主动运行 `wikiskill` 或 `start`。自动转换开关保持独立。默认端口 8765 被占用时自动选择空闲端口；以命令输出的地址为准。
+
+`worker --once` 执行当前可运行批次；`collector --once` 扫描一次轨迹。`web` 保留为前台页面开发入口。单独运行的 worker/collector 由启动终端管理，统一服务发现进程锁冲突会提示先停止独立进程。停止会中断当前模型执行，重启沿用已有批次恢复逻辑。若后续 MCP 操作又唤醒了服务，可关闭设置中的自动启动开关。
 
 ## 环境诊断
 

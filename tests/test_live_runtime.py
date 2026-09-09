@@ -178,8 +178,8 @@ for line in sys.stdin:
                                  poll_seconds=1, timeout_seconds=5, raw_auto=True, wiki_auto=True, codex_home=str(self.root / "empty-codex"), codex_command=[sys.executable, str(program)]))
         seed_record(runtime, runtime.store.project(str(self.project)), "worker")
         started = runtime.wake()
-        process_id = started["pid"]
         try:
+            self.assertEqual(started["state"], "running", started)
             deadline = time.monotonic() + 15
             jobs = []
             while time.monotonic() < deadline:
@@ -190,15 +190,8 @@ for line in sys.stdin:
             self.assertEqual(len(jobs), 2, jobs)
             self.assertTrue(all(j["state"] == "done" and j["report_sent"] for j in jobs), jobs)
         finally:
-            try:
-                os.killpg(process_id, signal.SIGTERM)
-                os.killpg(started["collector_pid"], signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                os.waitpid(process_id, 0)
-            except ChildProcessError:
-                pass
+            from wikiskill.live.services import stop_services
+            stop_services(runtime.config.root)
 
     def test_no_change_consumes_batch_without_skill_publication(self):
         self.collect()

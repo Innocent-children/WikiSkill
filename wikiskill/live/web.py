@@ -58,6 +58,7 @@ def create_app(root: str | Path = "~/.wikiskill") -> FastAPI:
         from .config import Config
         return Runtime(Config.load(view.root))
 
+    @app.exception_handler(RuntimeError)
     @app.exception_handler(ValueError)
     async def invalid(request: Request, exc: ValueError):
         return JSONResponse({"detail": str(exc)}, status_code=409)
@@ -81,7 +82,15 @@ def create_app(root: str | Path = "~/.wikiskill") -> FastAPI:
 
     @app.post("/api/start")
     def start():
-        return runtime().wake()
+        from .services import ensure_services
+        return ensure_services(view.root)
+
+    @app.get("/api/services")
+    def services():
+        from .services import service_status
+        current = getattr(app.state, "services", None)
+        value = current.status() if current else service_status(view.root)
+        return {k: v for k, v in value.items() if k != "identity"}
 
     @app.post("/api/history-import")
     def history_import():

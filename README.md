@@ -5,15 +5,16 @@
 Python 3.11+，macOS / Linux。前端开发需要 Node.js 22.12+。
 
 ```bash
-uv sync --frozen
-uv run --frozen wikiskill-codex init
-uv run --frozen wikiskill-codex web
+uv tool install .
+wikiskill
 ```
 
-按 `init` 输出的 `mcp_command` 注册本机 MCP。WebUI 默认打开地址为 `http://127.0.0.1:8765`。
+安装后可在任意目录运行 `wikiskill`。首次自动准备配置与数据库，启动 WebUI、采集器和 worker，就绪后打开浏览器设置页；之后进入知识工作台。默认使用 `http://127.0.0.1:8765`，端口被占用时自动选择可用端口，终端显示实际地址。同一数据目录重复运行会复用后台，关闭终端或页面后仍继续运行。
+
+从源码开发可用 `uv sync --frozen` 后运行 `uv run --frozen wikiskill`。普通安装使用包内 WebUI，无需安装 Node.js。
 
 1. 在设置页选择 Codex 新建会话，或填写 API 协议、地址、模型及 API key。
-2. 连接 MCP 后正常使用 Codex；首次采集从启用时开始，也可在页面点击“导入已有历史”。
+2. 正常使用 Codex，后台独立采集；首次从启动时开始，也可在页面点击“导入已有历史”。需要 Codex 查询或写入知识时，再按 `wikiskill init` 输出的 `mcp_command` 注册本机 MCP。
 3. 在知识工作台选择项目、查看 Raw 原文，点击 Raw → Wiki；Wiki 可新建、编辑和回退。
 4. 在 Wiki 列表或详情选择一篇或多篇正文生成 Skill，默认新建，也可查找并合并到已有 Skill。结果先保存在数据目录。
 5. 点击“安装到 Codex”。目标不存在时直接复制完整目录；同名目标展示差异，确认后覆盖。
@@ -23,6 +24,20 @@ uv run --frozen wikiskill-codex web
 两阶段自动转换默认关闭，可分别开启并设置阈值。Raw 按未处理的已结束轮次计数（包含中断），Wiki 按新增正文版本计数，自动转换只更新项目汇总 Skill，专题 Skill 通过手动选择 Wiki 更新。手动转换无需满足阈值。
 
 ## 数据与运行
+
+| 命令 | 用途 |
+| --- | --- |
+| `wikiskill` | 启动或复用整套后台，并打开面板 |
+| `wikiskill --no-open` / `wikiskill start` | 启动整套后台，保留地址，不打开浏览器 |
+| `wikiskill status` | 查看后台运行状态、地址和业务数量 |
+| `wikiskill stop` | 停止整套托管后台，保留数据 |
+| `wikiskill doctor` | 只读诊断本机环境 |
+
+指定数据目录时将 `--root /absolute/data` 放在子命令前，启动与停止使用相同目录。`--port 8766` 指定优先使用的端口，放在 `start` 前；已有实例继续使用其实际端口。浏览器未能打开时，手动打开终端输出的地址。
+
+主动启动始终生效；`auto_start` 只控制 MCP 等入口的自动唤醒，不控制模型自动转换。MCP 自动唤醒同时准备面板，但不弹出浏览器。`stop` 会中断正在执行的模型调用；已有数据保留，重启后的批次沿用原恢复规则。仍连接的 MCP 后续操作可能再次唤醒服务，需要持续停用时先关闭设置中的自动启动开关。
+
+`web` 是前台开发入口，退出终端会关闭该页面服务；单独启动的 `worker`、`collector` 由其启动终端管理。切换到统一后台前先停止这些独立进程。启动失败可查看数据目录中的 `service.log` 和 `worker.log`。
 
 默认数据目录 `~/.wikiskill`，包含配置、SQLite、自产 Skill、报告、锁和后台日志。API key 仅保存于权限受限的本地配置，页面读取接口、批次配置和报告不回显密钥。
 

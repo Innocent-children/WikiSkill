@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
-import sys
 import time
 import uuid
 from contextlib import nullcontext
@@ -371,11 +369,8 @@ class Runtime:
     def wake(self) -> dict:
         if not self.config.auto_start:
             return {"worker": "manual"}
-        with (self.config.root / "worker.log").open("ab") as log:
-            collector = subprocess.Popen([sys.executable, "-m", "wikiskill.live.cli", "--root", str(self.config.root), "collector"],
-                             stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                             cwd=self.config.root, start_new_session=True, close_fds=True)
-            process = subprocess.Popen([sys.executable, "-m", "wikiskill.live.cli", "--root", str(self.config.root), "worker"],
-                                       stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                                       cwd=self.config.root, start_new_session=True, close_fds=True)
-        return {"worker": "requested", "pid": process.pid, "collector_pid": collector.pid}
+        from .services import ensure_services
+        try:
+            return ensure_services(self.config.root)
+        except (OSError, ValueError, RuntimeError) as exc:
+            return {"worker": "unavailable", "worker_error": str(exc)}
