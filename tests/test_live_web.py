@@ -219,11 +219,16 @@ class LiveWebTests(unittest.TestCase):
 
     def test_paginated_queries_and_old_unrecorded_timestamps(self):
         self.collect()
-        self.runtime.drain()
+        self.assertEqual(self.runtime.drain(), 3)
         first = self.view.jobs(limit=1)
+        self.assertEqual(first["next_offset"], 1)
         second = self.view.jobs(offset=first["next_offset"], limit=1)
-        self.assertNotEqual(first["items"][0]["id"], second["items"][0]["id"])
-        self.assertIsNone(second["next_offset"])
+        self.assertEqual(second["next_offset"], 2)
+        third = self.view.jobs(offset=second["next_offset"], limit=1)
+        self.assertIsNone(third["next_offset"])
+        items = first["items"] + second["items"] + third["items"]
+        self.assertEqual(len({item["id"] for item in items}), 3)
+        self.assertCountEqual([item["stage"] for item in items], ["raw", "raw", "skill"])
         with self.runtime.store.transaction() as db:
             db.execute("DROP TABLE runtime_events")
             db.execute("DROP TABLE worker_runtime")

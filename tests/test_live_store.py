@@ -36,8 +36,9 @@ class LiveStoreTests(unittest.TestCase):
         seed_record(self.runtime, self.key)
         self.assertEqual(self.runtime.schedule(), [])
         job = self.runtime.enqueue(self.key, "raw")
-        with self.assertRaisesRegex(ValueError, "already"):
+        with self.assertRaisesRegex(ValueError, "^No pending inputs$"):
             self.runtime.enqueue(self.key, "raw")
+        self.assertEqual(self.runtime.store.rows("SELECT id FROM jobs"), [{"id": job["job_id"]}])
         self.assertEqual(self.runtime.store.job(job["job_id"])["inputs"], [1])
 
     def test_settings_do_not_return_key_and_reject_old_format(self):

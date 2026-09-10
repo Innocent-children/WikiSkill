@@ -90,7 +90,7 @@ class SessionWaitTests(unittest.TestCase):
 
     def test_new_record_delays_queued_job_and_explicit_run_bypasses_wait(self):
         job_id = self.runtime.schedule()[0]
-        seed_record(self.runtime, self.key, 'new')
+        seed_record(self.runtime, self.key, 'new', idle=False)
         self.assertFalse(self.runtime.run_job(job_id))
         self.assertEqual(self.runtime.store.job(job_id)['state'], 'queued')
         self.assertEqual(FakeSession.generations, [])

@@ -34,28 +34,42 @@ class CaptureTests(unittest.TestCase):
     def originals(self):
         return b"".join(r["original"] for r in self.collector.store.rows("SELECT original FROM trace_records ORDER BY source,offset"))
 
-    def test_start_point_history_partial_line_and_archive(self):
+    def test_updated_old_file_imports_history_and_waits_for_complete_line(self):
         before = transcript(self.project)
         self.path.write_bytes(before)
         os.utime(self.path, (1, 1))
         self.assertEqual(self.collector.scan(), 0)
+        self.assertEqual(self.originals(), b"")
         suffix = b'{"type":"unknown","payload":{"encrypted_content":"opaque"}}\n'
         with self.path.open("ab") as f:
             f.write(suffix[:-1])
-        self.assertEqual(self.collector.scan(), 0)
+        self.assertEqual(self.collector.scan(), 4)
+        self.assertEqual(self.originals(), before)
         with self.path.open("ab") as f:
             f.write(b"\n")
         self.assertEqual(self.collector.scan(), 1)
-        self.assertEqual(self.originals(), suffix)
+        self.assertEqual(self.originals(), before + suffix)
         archive = self.root / "codex/archived_sessions/log.jsonl"
         archive.parent.mkdir()
         self.path.rename(archive)
         self.assertEqual(self.collector.scan(), 0)
         self.collector.request_history()
-        self.assertEqual(self.collector.scan(), 4)
+        self.assertEqual(self.collector.scan(), 0)
         self.assertEqual(self.originals(), before + suffix)
         self.collector.request_history()
         self.assertEqual(self.collector.scan(), 0)
+
+    def test_explicit_history_imports_unchanged_old_file_once(self):
+        original = transcript(self.project)
+        self.path.write_bytes(original)
+        os.utime(self.path, (1, 1))
+        self.assertEqual(self.collector.scan(), 0)
+        self.collector.request_history()
+        self.assertEqual(self.collector.scan(), 4)
+        self.assertEqual(self.originals(), original)
+        self.collector.request_history()
+        self.assertEqual(self.collector.scan(), 0)
+        self.assertEqual(self.originals(), original)
 
     def test_new_file_unknown_bytes_and_truncation_keep_original(self):
         self.collector.scan()

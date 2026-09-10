@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -55,14 +56,22 @@ class FakeSession:
         return report["summary"]
 
 
-def seed_record(runtime, project, event="one"):
+def seed_record(runtime, project, event="one", *, idle=True):
+    """Seed an ended turn and its source file; idle fixtures are ready for scheduling."""
     import time
+    created = time.time() - (runtime.config.session_wait_minutes * 60 + 5 if idle else 0)
+    source = runtime.config.root / "fixture.jsonl"
     with runtime.store.transaction() as db:
-        db.execute("INSERT OR IGNORE INTO trace_sources(id,identity,path,fingerprint,prefix_length) VALUES(1,'fixture','fixture','',0)")
+        db.execute("INSERT OR IGNORE INTO trace_sources(id,identity,path,fingerprint,prefix_length) VALUES(1,'fixture',?,'',0)", (str(source),))
         db.execute("INSERT OR IGNORE INTO trace_turns(source,turn_key,project,ended) VALUES(1,?,?,1)", (event,project))
         turn = db.execute("SELECT id FROM trace_turns WHERE source=1 AND turn_key=?", (event,)).fetchone()[0]
         db.execute("INSERT OR IGNORE INTO trace_records(source,offset,original,project,turn_id,event_type,created) VALUES(1,?,?,?,?,?,?)",
-                   (turn, json.dumps({"type":"response_item","payload":{"event":event,**OBSERVATION}}).encode()+b"\n", project,turn,"response_item",time.time()))
+                   (turn, json.dumps({"type":"response_item","payload":{"event":event,**OBSERVATION}}).encode()+b"\n", project,turn,"response_item",created))
+        source = Path(db.execute("SELECT path FROM trace_sources WHERE id=1").fetchone()[0])
+        source.write_bytes(b"".join(row[0] for row in db.execute(
+            "SELECT original FROM trace_records WHERE source=1 ORDER BY offset")))
+        os.utime(source, (created, created))
+        db.execute("UPDATE trace_sources SET position=? WHERE id=1", (source.stat().st_size,))
         runtime.store.event(db, "capture.updated", project=project)
     return {"raw_id": str(turn)}
 
