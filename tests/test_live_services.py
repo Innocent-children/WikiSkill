@@ -47,8 +47,8 @@ class ServiceTests(unittest.TestCase):
         with urllib.request.urlopen(status["url"]) as response:
             self.assertIn(b"<html", response.read().lower())
         config = Config.load(self.root)
-        self.assertFalse(config.raw_auto)
-        self.assertFalse(config.wiki_auto)
+        self.assertEqual(config.capture_mode, "manual")
+        self.assertEqual(status["collector"], "disabled")
         self.assertEqual((self.root / "service.json").stat().st_mode & 0o777, 0o600)
         with patch("webbrowser.open", side_effect=OSError("no desktop")) as browser, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(main(["--root", str(self.root)]), 0)
@@ -60,6 +60,29 @@ class ServiceTests(unittest.TestCase):
             self.assertFalse(_held(self.root / f"locks/{name}-process.lock"))
         self.assertTrue((self.root / "state.sqlite3").exists())
         self.assertTrue((self.root / "config.json").exists())
+
+    def test_mode_switch_starts_and_stops_collector_without_restarting_worker(self):
+        Runtime(Config(self.root, codex_home=str(self.directory / 'empty-codex'), auto_start=False))
+        ensure_services(self.root)
+        descriptor = _descriptor(self.root)
+        import urllib.request
+        def save(mode):
+            request = urllib.request.Request(f"http://127.0.0.1:{descriptor['port']}/api/settings",
+                data=json.dumps({'capture_mode':mode}).encode(), headers={'Content-Type':'application/json'}, method='PUT')
+            with urllib.request.urlopen(request) as response:
+                self.assertEqual(response.status, 200)
+        before = service_status(self.root)
+        self.assertEqual(before['collector'], 'disabled')
+        save('automatic')
+        automatic = service_status(self.root)
+        self.assertEqual(automatic['collector'], 'running')
+        self.assertTrue(_held(self.root / 'locks/collector-process.lock'))
+        save('manual')
+        manual = service_status(self.root)
+        self.assertEqual(manual['collector'], 'disabled')
+        self.assertFalse(_held(self.root / 'locks/collector-process.lock'))
+        self.assertEqual(manual['pid'], before['pid'])
+        self.assertEqual(manual['worker'], 'running')
 
     def test_concurrent_launch_and_occupied_port(self):
         with socket.socket() as occupied:

@@ -205,7 +205,7 @@ class SkillManager:
                     row[key] = json.loads(row[key])
         return rows
 
-    def rollback(self, skill_id: str, version_id: str, side: str = "before") -> dict:
+    def rollback(self, skill_id: str, version_id: str, side: str = "before", reason: str = "恢复到选定历史内容") -> dict:
         if side not in {"before", "after"}:
             raise ValueError("side must be before or after")
         with self.lock(skill_id):
@@ -217,4 +217,11 @@ class SkillManager:
             if not versions or versions[0]["state"] != "applied":
                 raise ValueError("Choose an applied version of this Skill")
             target = versions[0][f"{side}_bundle"]
-            return self.publish(skill_id, "rollback-" + uuid.uuid4().hex, snapshot(Path(skill["path"])), target)
+            if not isinstance(reason, str) or not reason.strip() or len(reason) > 8000:
+                raise ValueError('请填写恢复原因（最多 8000 字）')
+            current_versions = self.history(skill_id)
+            previous_id = next((v['id'] for v in current_versions if v['state'] == 'applied'), version_id)
+            result = self.publish(skill_id, "rollback-" + uuid.uuid4().hex, snapshot(Path(skill["path"])), target)
+            from .evolution import Evolution
+            Evolution(self.store).feedback(skill_id, previous_id, 'rollback', f"{reason}；恢复到 {version_id} 的 {side} 内容")
+            return result

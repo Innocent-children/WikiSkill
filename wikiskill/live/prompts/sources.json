@@ -1,0 +1,16 @@
+{
+  "paper": "https://arxiv.org/html/2608.27454v1",
+  "license": "CC-BY-4.0",
+  "files": {
+    "maintainer.md": {
+      "section": "E.2",
+      "sha256": "f736a561a3ce6b0f2f54bc038ccda90c6b6567c02306c9cb20c3c40aac1f8e3c",
+      "source": "Original extracted prompt retained in Git commit 45c7677"
+    },
+    "proposer.md": {
+      "section": "E.3",
+      "sha256": "d464898a0b5e1bc1a2d2b5728aef731b8aa897698c71b37c0041bc2aec8c7ef1",
+      "source": "Original extracted prompt retained in Git commit 45c7677"
+    }
+  }
+}

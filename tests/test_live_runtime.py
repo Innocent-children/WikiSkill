@@ -44,7 +44,7 @@ class FakeSession:
         if type(self).during_generate:
             type(self).during_generate()
         if stage == "raw":
-            return {"summary": "Recorded build lesson", "pages": [] if self.no_change else [{"name": "build", "body": "Read the configured JDK before building."}]}
+            return {"summary": "Recorded build lesson", "pages": [] if self.no_change else [{"name": "build", "body": "Read the configured JDK before building.", "source_ids": [r["id"] for r in context["records"]]}]}
         return {"summary": "Added the build procedure", "skill_md": None if self.no_change else
                 f"---\nname: {context['suggested_name']}\ndescription: Build this project.\n---\n\nRead the project JDK configuration.\n"}
 
@@ -77,8 +77,10 @@ class LiveRuntimeTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.project = self.root / "project"
         self.project.mkdir()
-        self.runtime = Runtime(Config(self.root / "home", raw_threshold=1, wiki_threshold=1, auto_start=False, raw_auto=True, wiki_auto=True), FakeSession)
+        self.runtime = Runtime(Config(self.root / "home", auto_start=False, capture_mode="automatic"), FakeSession)
         self.key = self.runtime.store.project(str(self.project))
+        with self.runtime.store.transaction() as db:
+            db.execute('INSERT INTO skill_wiki VALUES(?,?,?,0)', (self.runtime.store.skills(self.key)[0]['id'], self.key, 'build'))
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -151,31 +153,8 @@ class LiveRuntimeTests(unittest.TestCase):
         import signal
         import sys
         import time
-        program = self.root / "fake_codex.py"
-        program.write_text('''import json,sys,uuid
-thread_id=uuid.uuid4().hex
-for line in sys.stdin:
- m=json.loads(line)
- if "id" not in m: continue
- method=m["method"]; params=m.get("params",{})
- result={}
- if method=="config/read": result={"config":{}}
- elif method=="thread/start": result={"thread":{"id":thread_id}}
- elif method=="turn/start": result={"turn":{"id":str(m["id"])}}
- print(json.dumps({"id":m["id"],"result":result}),flush=True)
- if method=="turn/start":
-  schema=params.get("outputSchema")
-  if schema and "pages" in schema["properties"]:
-   text=json.dumps({"summary":"Build lesson","pages":[{"name":"build","body":"Use the configured JDK."}]})
-  elif schema:
-   text=json.dumps({"summary":"Created build skill","skill_md":"---\\nname: build\\ndescription: Build the project.\\n---\\nUse the configured JDK.\\n"})
-  else: text="Final report recorded."
-  turn_id=str(m["id"])
-  print(json.dumps({"method":"item/completed","params":{"threadId":thread_id,"turnId":turn_id,"item":{"type":"agentMessage","id":"answer","text":text}}}),flush=True)
-  print(json.dumps({"method":"turn/completed","params":{"threadId":thread_id,"turn":{"id":turn_id,"status":"completed"}}}),flush=True)
-''')
-        runtime = Runtime(Config(self.root / "worker-home", raw_threshold=1, wiki_threshold=1,
-                                 poll_seconds=1, timeout_seconds=5, raw_auto=True, wiki_auto=True, codex_home=str(self.root / "empty-codex"), codex_command=[sys.executable, str(program)]))
+        program = Path(__file__).parent / 'fixtures' / 'codex_paper_server.py'
+        runtime = Runtime(Config(self.root / "worker-home", poll_seconds=1, timeout_seconds=5, capture_mode="automatic", codex_home=str(self.root / "empty-codex"), codex_command=[sys.executable, str(program)]))
         seed_record(runtime, runtime.store.project(str(self.project)), "worker")
         started = runtime.wake()
         try:
@@ -234,19 +213,21 @@ for line in sys.stdin:
         shared = self.runtime.store.skills(self.key)[0]["id"]
         with self.runtime.store.transaction() as db:
             db.execute("INSERT INTO project_skills VALUES(?,?)", (key2, shared))
+        with self.runtime.store.transaction() as db:
+            db.execute('INSERT INTO skill_wiki VALUES(?,?,?,0)', (shared, key2, 'build'))
         for project in (self.project, project2):
             self.runtime.put_wiki(str(project), [{"name": "build", "body": "Check the build"}])
         self.runtime.schedule()
         jobs = self.runtime.store.rows("SELECT * FROM jobs WHERE skill=?", (shared,))
         self.assertEqual(len(jobs), 1)
         self.runtime.drain()
-        self.assertEqual(len(self.runtime.store.rows("SELECT * FROM jobs WHERE skill=?", (shared,))), 1)
-        # Other projects explicitly select Wiki when updating this summary Skill.
+        self.assertEqual(len(self.runtime.store.rows("SELECT * FROM jobs WHERE skill=?", (shared,))), 2)
+        self.runtime.put_wiki(str(project2), [{"name": "build", "body": "Updated build procedure"}])
         self.runtime.enqueue(key2, "skill", skill=shared)
         with self.assertRaises(ValueError):
             self.runtime.enqueue(self.key, "skill", skill=shared)
         self.runtime.drain()
-        self.assertEqual(len(self.runtime.store.rows("SELECT * FROM jobs WHERE skill=?", (shared,))), 2)
+        self.assertEqual(len(self.runtime.store.rows("SELECT * FROM jobs WHERE skill=?", (shared,))), 3)
 
 
 if __name__ == "__main__":

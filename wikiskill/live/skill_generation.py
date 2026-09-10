@@ -8,6 +8,7 @@ import yaml
 from .config import digest
 from .skills import skill_text, snapshot
 from .store import dumps
+from .evolution import enrich_context
 
 
 def terms(text: str) -> set[str]:
@@ -60,10 +61,13 @@ class SkillGeneration:
             except (OSError, ValueError, IndexError, yaml.YAMLError) as exc:
                 unavailable.append({"name": path.name, "reason": str(exc)})
                 continue
+            linked = self.store.rows('SELECT name,change_id FROM skill_wiki WHERE skill=? AND project=?', (target['id'], project))
+            linked_names = {r['name'] for r in linked}
+            relevant = [p['name'] for p in selected if p['name'] in linked_names]
             matched = sorted(vocabulary & terms(path.name + "\n" + text))
             candidates.append({"id": target["id"], "name": path.name, "description": description,
                                "skill_md": text, "digest": digest(bundle), "matched_terms": matched[:8],
-                               "score": len(matched), "projects": self.store.rows(
+                               "linked_pages": relevant, "score": len(matched) + 1000 * len(relevant), "projects": self.store.rows(
                                    "SELECT p.id,p.name FROM projects p JOIN project_skills s ON s.project=p.id "
                                    "WHERE s.skill=? ORDER BY p.name", (target["id"],))})
         candidates.sort(key=lambda c: (-c["score"], c["name"]))
@@ -106,6 +110,7 @@ class SkillGeneration:
                        "changes": [{k: p[k] for k in ("id", "name", "body")} for p in selected],
                        "before_bundle": before, "skill_md": skill_text(before),
                        "suggested_name": Path(target["path"]).name}
+            enrich_context(db, context, skill)
             db.execute("INSERT OR IGNORE INTO project_skills VALUES(?,?)", (project, skill))
             job = self.runtime._enqueue(db, project, "skill", skill, [p["id"] for p in selected])
             db.execute("UPDATE jobs SET context=? WHERE id=?", (dumps(context), job))

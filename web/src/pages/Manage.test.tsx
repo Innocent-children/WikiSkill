@@ -15,10 +15,11 @@ afterEach(() => {
 
 it("saves execution settings and clears typed secrets after success", async () => {
   const config = {
-    raw_threshold: 10,
-    wiki_threshold: 5,
-    raw_auto: false,
-    wiki_auto: false,
+    capture_mode: "manual",
+    analysis_interval_minutes: 60,
+
+
+    ollama_model: "",
     executor: "codex",
     api_provider: "chat_completions",
     api_url: "https://example.test/v1",
@@ -27,8 +28,8 @@ it("saves execution settings and clears typed secrets after success", async () =
     codex_home: "/tmp/codex",
     install_directory: "/tmp/codex/skills",
     model: null,
-    max_tokens: 384000,
-    context_window: 1000000,
+
+
     timeout_seconds: 600,
     poll_seconds: 10,
     auto_start: true,
@@ -50,21 +51,21 @@ it("saves execution settings and clears typed secrets after success", async () =
   const executor = await screen.findByLabelText("执行方式");
   expect(screen.queryByLabelText(/API key/)).toBeNull();
   fireEvent.change(executor, { target: { value: "api" } });
-  fireEvent.change(screen.getByLabelText("最大输出（tokens）"), { target: { value: "500000" } });
-  fireEvent.change(screen.getByLabelText("上下文窗口（tokens）"), { target: { value: "2000000" } });
   const key = await screen.findByLabelText(/API key/);
   expect((key as HTMLInputElement).value).toBe("");
   fireEvent.change(key, { target: { value: "test-key" } });
-  fireEvent.click(screen.getByLabelText("自动 Raw → Wiki"));
+  fireEvent.change(screen.getByLabelText("分析模式"), {
+    target: { value: "automatic" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
   await screen.findByText("设置已保存");
   const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>;
   const write = calls.find(([, options]) => options?.method === "PUT")!;
   expect(JSON.parse(write[1].body as string)).toMatchObject({
-    max_tokens: 500000,
-    context_window: 2000000,
+
+
     api_key: "test-key",
-    raw_auto: true,
+    capture_mode: "automatic",
   });
   expect(JSON.parse(write[1].body as string)).not.toHaveProperty(
     "api_key_configured",
@@ -315,7 +316,9 @@ function wikiFixture() {
       return Response.json({ detail: "读取失败" }, { status: 500 });
     const name = url.split("/").at(-1)!;
     return Response.json({
-      name, ...pages[name], changes: { items: [], next_offset: null },
+      name,
+      ...pages[name],
+      changes: { items: [], next_offset: null },
     });
   });
   vi.stubGlobal("fetch", fetcher);
@@ -323,8 +326,15 @@ function wikiFixture() {
 }
 
 function wikiView(revision = 0) {
-  return <Manage snapshot={snapshot} project="alpha" layer="wiki"
-    revision={revision} refresh={() => {}} />;
+  return (
+    <Manage
+      snapshot={snapshot}
+      project="alpha"
+      layer="wiki"
+      revision={revision}
+      refresh={() => {}}
+    />
+  );
 }
 
 function unloadIsBlocked() {
@@ -337,8 +347,12 @@ it("keeps edited text when document changes or a new page are cancelled", async 
   const { fetcher, pages } = wikiFixture();
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
   render(wikiView());
-  fireEvent.click(await screen.findByRole("button", { name: "打开 Wiki build" }));
-  const body = await screen.findByLabelText("正文（Markdown）") as HTMLTextAreaElement;
+  fireEvent.click(
+    await screen.findByRole("button", { name: "打开 Wiki build" }),
+  );
+  const body = (await screen.findByLabelText(
+    "正文（Markdown）",
+  )) as HTMLTextAreaElement;
   fireEvent.change(body, { target: { value: "Unsaved build" } });
   fireEvent.click(screen.getByRole("button", { name: "打开 Wiki build" }));
   expect(confirm).not.toHaveBeenCalled();
@@ -348,10 +362,16 @@ it("keeps edited text when document changes or a new page are cancelled", async 
   expect(body.value).toBe("Unsaved build");
   expect(unloadIsBlocked()).toBe(true);
   expect(pages.build.body).toBe("# Build");
-  expect(fetcher.mock.calls.filter(([, options]) => options?.method === "PUT")).toHaveLength(0);
+  expect(
+    fetcher.mock.calls.filter(([, options]) => options?.method === "PUT"),
+  ).toHaveLength(0);
   confirm.mockReturnValue(true);
   fireEvent.click(screen.getByRole("button", { name: "打开 Wiki tests" }));
-  await waitFor(() => expect((screen.getByLabelText("正文（Markdown）") as HTMLTextAreaElement).value).toBe("# Tests"));
+  await waitFor(() =>
+    expect(
+      (screen.getByLabelText("正文（Markdown）") as HTMLTextAreaElement).value,
+    ).toBe("# Tests"),
+  );
   expect(unloadIsBlocked()).toBe(false);
 });
 
@@ -361,16 +381,26 @@ it("guards a new page name and resets a second new page only after confirmation"
   const view = render(wikiView());
   fireEvent.click(screen.getByRole("button", { name: /新建知识页/ }));
   expect(unloadIsBlocked()).toBe(false);
-  fireEvent.change(screen.getByLabelText("页面名称"), { target: { value: "draft" } });
+  fireEvent.change(screen.getByLabelText("页面名称"), {
+    target: { value: "draft" },
+  });
   fireEvent.click(screen.getByRole("button", { name: /新建知识页/ }));
-  expect((screen.getByLabelText("页面名称") as HTMLInputElement).value).toBe("draft");
+  expect((screen.getByLabelText("页面名称") as HTMLInputElement).value).toBe(
+    "draft",
+  );
   expect(unloadIsBlocked()).toBe(true);
   confirm.mockReturnValue(true);
   fireEvent.click(screen.getByRole("button", { name: /新建知识页/ }));
-  expect((screen.getByLabelText("页面名称") as HTMLInputElement).value).toBe("");
-  expect((screen.getByLabelText("正文（Markdown）") as HTMLTextAreaElement).value).toBe("");
+  expect((screen.getByLabelText("页面名称") as HTMLInputElement).value).toBe(
+    "",
+  );
+  expect(
+    (screen.getByLabelText("正文（Markdown）") as HTMLTextAreaElement).value,
+  ).toBe("");
   expect(unloadIsBlocked()).toBe(false);
-  fireEvent.change(screen.getByLabelText("正文（Markdown）"), { target: { value: "Body only" } });
+  fireEvent.change(screen.getByLabelText("正文（Markdown）"), {
+    target: { value: "Body only" },
+  });
   expect(unloadIsBlocked()).toBe(true);
   view.unmount();
   expect(unloadIsBlocked()).toBe(false);
@@ -380,7 +410,9 @@ it("clears the guard when edits are reverted or a save succeeds", async () => {
   wikiFixture();
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
   render(wikiView());
-  fireEvent.click(await screen.findByRole("button", { name: "打开 Wiki build" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "打开 Wiki build" }),
+  );
   const body = await screen.findByLabelText("正文（Markdown）");
   expect(unloadIsBlocked()).toBe(false);
   fireEvent.change(body, { target: { value: "Modified" } });
@@ -400,8 +432,12 @@ it("preserves input and the original expected digest after a failed save and ref
   control.failWrite = true;
   vi.spyOn(window, "confirm").mockReturnValue(false);
   const view = render(wikiView());
-  fireEvent.click(await screen.findByRole("button", { name: "打开 Wiki build" }));
-  const body = await screen.findByLabelText("正文（Markdown）") as HTMLTextAreaElement;
+  fireEvent.click(
+    await screen.findByRole("button", { name: "打开 Wiki build" }),
+  );
+  const body = (await screen.findByLabelText(
+    "正文（Markdown）",
+  )) as HTMLTextAreaElement;
   fireEvent.change(body, { target: { value: "Keep this input" } });
   fireEvent.click(screen.getByRole("button", { name: "保存 Wiki" }));
   await screen.findByText("保存失败");
@@ -409,24 +445,36 @@ it("preserves input and the original expected digest after a failed save and ref
   pages.build = { body: "Someone else's update", digest: "remote" };
   const readsBefore = fetcher.mock.calls.length;
   view.rerender(wikiView(1));
-  await waitFor(() => expect(fetcher.mock.calls.length).toBeGreaterThan(readsBefore));
+  await waitFor(() =>
+    expect(fetcher.mock.calls.length).toBeGreaterThan(readsBefore),
+  );
   fireEvent.click(screen.getByRole("button", { name: "打开 Wiki tests" }));
   expect(body.value).toBe("Keep this input");
   expect(unloadIsBlocked()).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "保存 Wiki" }));
   await screen.findByText("保存失败");
-  const writes = fetcher.mock.calls.filter(([, options]) => options?.method === "PUT");
+  const writes = fetcher.mock.calls.filter(
+    ([, options]) => options?.method === "PUT",
+  );
   expect(writes).toHaveLength(2);
-  expect(JSON.parse(writes[1][1]!.body as string).expected).toEqual({ build: "original" });
+  expect(JSON.parse(writes[1][1]!.body as string).expected).toEqual({
+    build: "original",
+  });
 });
 
 it("keeps edits made while a save is pending dirty after the submitted body is saved", async () => {
   const { control, pages } = wikiFixture();
   let finish!: () => void;
-  control.pending = new Promise<void>((resolve) => { finish = resolve; });
+  control.pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
   render(wikiView());
-  fireEvent.click(await screen.findByRole("button", { name: "打开 Wiki build" }));
-  const body = await screen.findByLabelText("正文（Markdown）") as HTMLTextAreaElement;
+  fireEvent.click(
+    await screen.findByRole("button", { name: "打开 Wiki build" }),
+  );
+  const body = (await screen.findByLabelText(
+    "正文（Markdown）",
+  )) as HTMLTextAreaElement;
   fireEvent.change(body, { target: { value: "Submitted" } });
   fireEvent.click(screen.getByRole("button", { name: "保存 Wiki" }));
   fireEvent.change(body, { target: { value: "Typed later" } });
@@ -443,14 +491,20 @@ it("retains a new draft when reading back a successful write fails", async () =>
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
   render(wikiView());
   fireEvent.click(screen.getByRole("button", { name: /新建知识页/ }));
-  fireEvent.change(screen.getByLabelText("页面名称"), { target: { value: "draft" } });
-  fireEvent.change(screen.getByLabelText("正文（Markdown）"), { target: { value: "Draft content" } });
+  fireEvent.change(screen.getByLabelText("页面名称"), {
+    target: { value: "draft" },
+  });
+  fireEvent.change(screen.getByLabelText("正文（Markdown）"), {
+    target: { value: "Draft content" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "保存 Wiki" }));
   await screen.findByText("读取失败");
   expect(pages.draft.body).toBe("Draft content");
   fireEvent.click(screen.getByRole("button", { name: /新建知识页/ }));
   expect(confirm).toHaveBeenCalledOnce();
-  expect((screen.getByLabelText("正文（Markdown）") as HTMLTextAreaElement).value).toBe("Draft content");
+  expect(
+    (screen.getByLabelText("正文（Markdown）") as HTMLTextAreaElement).value,
+  ).toBe("Draft content");
   expect(unloadIsBlocked()).toBe(true);
 });
 
@@ -532,7 +586,13 @@ it("selects Wiki across pages and starts generation from a saved detail", async 
   fireEvent.click(await screen.findByLabelText("选择 Wiki build"));
   fireEvent.click(screen.getByRole("button", { name: "下一页" }));
   fireEvent.click(await screen.findByLabelText("选择 Wiki tests"));
-  expect((screen.getByRole("button", { name: "导出选定 Wiki（2）" }) as HTMLButtonElement).disabled).toBe(false);
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "导出选定 Wiki（2）",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(false);
   fireEvent.click(
     screen.getByRole("button", { name: "从选定 Wiki 生成 Skill（2）" }),
   );
@@ -618,19 +678,34 @@ it("searches Wiki with literal text, resets pages, and keeps selection and the o
   const fetcher = vi.fn(async (url: string) => {
     if (url.endsWith("/wiki/build"))
       return Response.json({
-        name: "build", body: "Saved body", digest: "saved",
+        name: "build",
+        body: "Saved body",
+        digest: "saved",
         changes: { items: [], next_offset: null },
       });
     const params = new URL(url, "http://localhost").searchParams;
     const q = params.get("q");
     if (q === "missing") return Response.json({ items: [], next_offset: null });
     return Response.json({
-      items: [{ name: params.get("offset") === "20" ? "later" : "build", excerpt: q || "All Wiki" }],
+      items: [
+        {
+          name: params.get("offset") === "20" ? "later" : "build",
+          excerpt: q || "All Wiki",
+        },
+      ],
       next_offset: params.get("offset") === "20" ? null : 20,
     });
   });
   vi.stubGlobal("fetch", fetcher);
-  render(<Manage snapshot={snapshot} project="alpha" layer="wiki" revision={0} refresh={() => {}} />);
+  render(
+    <Manage
+      snapshot={snapshot}
+      project="alpha"
+      layer="wiki"
+      revision={0}
+      refresh={() => {}}
+    />,
+  );
   fireEvent.click(await screen.findByLabelText("选择 Wiki build"));
   fireEvent.click(screen.getByRole("button", { name: "打开 Wiki build" }));
   await screen.findByDisplayValue("Saved body");
@@ -642,9 +717,12 @@ it("searches Wiki with literal text, resets pages, and keeps selection and the o
   fireEvent.submit(screen.getByRole("search"));
   await screen.findByRole("button", { name: "打开 Wiki build" });
   expect(screen.getByText("第 1 页")).toBeTruthy();
-  expect((screen.getByLabelText("选择 Wiki build") as HTMLInputElement).checked).toBe(true);
+  expect(
+    (screen.getByLabelText("选择 Wiki build") as HTMLInputElement).checked,
+  ).toBe(true);
   expect(screen.getByDisplayValue("Saved body")).toBeTruthy();
-  const lastParams = () => new URL(fetcher.mock.calls.at(-1)![0], "http://localhost").searchParams;
+  const lastParams = () =>
+    new URL(fetcher.mock.calls.at(-1)![0], "http://localhost").searchParams;
   expect(lastParams().get("q")).toBe(term);
   expect(lastParams().get("offset")).toBe("0");
   fireEvent.click(screen.getByRole("button", { name: "下一页" }));
@@ -661,18 +739,33 @@ it("searches Wiki with literal text, resets pages, and keeps selection and the o
   expect(lastParams().has("q")).toBe(false);
   expect(lastParams().get("offset")).toBe("0");
   expect((input as HTMLInputElement).value).toBe("");
-  expect((screen.getByLabelText("选择 Wiki build") as HTMLInputElement).checked).toBe(true);
+  expect(
+    (screen.getByLabelText("选择 Wiki build") as HTMLInputElement).checked,
+  ).toBe(true);
 });
 
 it("shows a failed Wiki search as an error rather than no matches", async () => {
-  vi.stubGlobal("fetch", vi.fn(async (url: string) =>
-    url.includes("q=")
-      ? Response.json({ detail: "搜索读取失败" }, { status: 503 })
-      : Response.json({ items: [], next_offset: null }),
-  ));
-  render(<Manage snapshot={snapshot} project="alpha" layer="wiki" revision={0} refresh={() => {}} />);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url.includes("q=")
+        ? Response.json({ detail: "搜索读取失败" }, { status: 503 })
+        : Response.json({ items: [], next_offset: null }),
+    ),
+  );
+  render(
+    <Manage
+      snapshot={snapshot}
+      project="alpha"
+      layer="wiki"
+      revision={0}
+      refresh={() => {}}
+    />,
+  );
   await screen.findByText("还没有知识文档");
-  fireEvent.change(screen.getByLabelText("搜索 Wiki"), { target: { value: "query" } });
+  fireEvent.change(screen.getByLabelText("搜索 Wiki"), {
+    target: { value: "query" },
+  });
   fireEvent.submit(screen.getByRole("search"));
   expect(await screen.findByText("搜索读取失败")).toBeTruthy();
   expect(screen.queryByText("没有匹配的 Wiki")).toBeNull();

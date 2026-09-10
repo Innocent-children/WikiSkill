@@ -175,7 +175,7 @@ class WikiTransferTests(unittest.TestCase):
             raise RuntimeError("injected write failure")
 
         with patch("wikiskill.live.wiki_transfer.write_pages", side_effect=fail_after_first):
-            self.assertEqual(self.submit(data, preview, ["build"]).status_code, 500)
+            self.assertEqual(self.submit(data, preview, ["build"]).status_code, 409)
         self.assertEqual(self.state(), before)
 
     def test_invalid_archives_fail_before_any_page_is_written(self):

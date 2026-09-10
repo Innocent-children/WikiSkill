@@ -59,6 +59,16 @@ CREATE TABLE IF NOT EXISTS generated_sessions(id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS job_execution(job TEXT PRIMARY KEY, settings TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS installations(id TEXT PRIMARY KEY, skill TEXT NOT NULL, target TEXT NOT NULL,
  before_bundle TEXT NOT NULL, after_bundle TEXT NOT NULL, state TEXT NOT NULL, created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS wiki_documents(project TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL,
+ PRIMARY KEY(project,kind));
+CREATE TABLE IF NOT EXISTS wiki_sources(change_id INTEGER NOT NULL, record_id INTEGER NOT NULL,
+ PRIMARY KEY(change_id,record_id));
+CREATE TABLE IF NOT EXISTS skill_wiki(skill TEXT NOT NULL, project TEXT NOT NULL, name TEXT NOT NULL,
+ change_id INTEGER NOT NULL, PRIMARY KEY(skill,project,name));
+CREATE TABLE IF NOT EXISTS skill_feedback(id INTEGER PRIMARY KEY, skill TEXT NOT NULL, version_id TEXT NOT NULL,
+ kind TEXT NOT NULL, body TEXT NOT NULL, created REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS automatic_jobs(job TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS automatic_analysis(project TEXT PRIMARY KEY, last_run REAL NOT NULL);
 """
 
 
@@ -173,7 +183,7 @@ class Store:
                 skill["wiki_pending"] = self.rows("SELECT count(*) n FROM wiki_changes w WHERE project=? AND NOT EXISTS "
                     "(SELECT 1 FROM consumed_wiki c WHERE c.change_id=w.id AND c.skill=?)", (key, skill["id"]))[0]["n"]
             item["jobs"] = self.rows("SELECT id,stage,skill,state,thread_id,error,report_sent,created FROM jobs WHERE project=? ORDER BY created DESC LIMIT 50", (key,))
-        return {"projects": projects, "thresholds": {"raw": self.config.raw_threshold, "wiki": self.config.wiki_threshold}}
+        return {"projects": projects, "thresholds": {"analysis_interval_minutes": self.config.analysis_interval_minutes}}
 
     def query(self, project: str, layer: str, key: str | None = None, offset: int = 0, limit: int = 50) -> dict:
         if type(offset) is not int or type(limit) is not int or offset < 0 or not 1 <= limit <= 100:

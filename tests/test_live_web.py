@@ -27,8 +27,10 @@ class LiveWebTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.project = self.root / "project"
         self.project.mkdir()
-        self.runtime = Runtime(Config(self.root / "home", raw_threshold=2, wiki_threshold=1, auto_start=False, raw_auto=True, wiki_auto=True), FakeSession)
+        self.runtime = Runtime(Config(self.root / "home", auto_start=False, capture_mode="automatic"), FakeSession)
         self.key = self.runtime.store.project(str(self.project))
+        with self.runtime.store.transaction() as db:
+            db.execute('INSERT INTO skill_wiki VALUES(?,?,?,0)', (self.runtime.store.skills(self.key)[0]['id'], self.key, 'build'))
         self.view = ReadView(self.runtime.config.root)
         self.client = TestClient(create_app(self.runtime.config.root), base_url="http://127.0.0.1")
         FakeSession.starts, FakeSession.generations, FakeSession.reports = [], [], []
@@ -101,6 +103,8 @@ class LiveWebTests(unittest.TestCase):
         FakeSession.no_change = False
         FakeSession.fail_generate = True
         self.collect("failure")
+        with self.runtime.store.transaction() as db:
+            db.execute("UPDATE automatic_analysis SET last_run=0")
         self.runtime.drain()
         job = self.view.jobs(state="failed")["items"][0]
         self.assertEqual(job["report_status"], "sent")
@@ -161,15 +165,11 @@ class LiveWebTests(unittest.TestCase):
         self.assertFalse(self.view.skill(shared)["enabled"])
         self.assertTrue(self.view.skill(shared)["versions"]["items"])
 
-    def test_model_limits_are_saved_without_fixed_ceiling(self):
-        response = self.client.put("/api/settings", json={"max_tokens": 500000, "context_window": 2000000})
-        self.assertEqual(response.status_code, 200)
-        saved = self.client.get("/api/settings").json()
-        self.assertEqual(saved["max_tokens"], 500000)
-        self.assertEqual(saved["context_window"], 2000000)
-        self.assertNotIn("input_budget", saved)
-        for value in (0, -1, 1.5, True):
-            self.assertEqual(self.client.put("/api/settings", json={"max_tokens": value}).status_code, 409)
+    def test_token_and_call_limits_are_absent_from_current_settings(self):
+        saved = self.client.get('/api/settings').json()
+        for name in ('max_tokens', 'context_window', 'analysis_input_tokens', 'analysis_max_calls'):
+            self.assertNotIn(name, saved)
+            self.assertEqual(self.client.put('/api/settings', json={name: 1}).status_code, 409)
 
     def test_config_errors_limits_and_local_access(self):
         self.assertEqual(self.client.get("/api/jobs?limit=0").status_code, 422)
@@ -179,10 +179,10 @@ class LiveWebTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/snapshot", headers={"Host": "attacker.example"}).status_code, 403)
         self.assertEqual(self.client.get("/api/snapshot", headers={"Origin": "https://attacker.example"}).status_code, 403)
         self.assertEqual(self.client.get("/api/snapshot", headers={"Sec-Fetch-Site": "cross-site"}).status_code, 403)
-        (self.view.root / "config.json").write_text('{"raw_threshold": 0}')
+        (self.view.root / "config.json").write_text('{"analysis_interval_minutes": 0}')
         data = self.client.get("/api/snapshot").json()
         self.assertIsNone(data["config"])
-        self.assertIn("raw_threshold", data["config_error"])
+        self.assertIn("analysis_interval_minutes", data["config_error"])
         self.assertEqual(data["projects"][0]["raw"]["reason"], "config_error")
 
     def test_paginated_queries_and_old_unrecorded_timestamps(self):

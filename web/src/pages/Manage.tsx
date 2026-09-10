@@ -1,4 +1,6 @@
 import { useAction } from "../actions";
+import { WikiSources } from "../WikiSources";
+import { SessionPicker } from "../SessionPicker";
 import { SkillGeneration } from "../SkillGeneration";
 import { WikiTransfer } from "../WikiTransfer";
 import { WikiSearch } from "../WikiSearch";
@@ -55,6 +57,12 @@ export function Settings() {
 
 function SettingsForm({ initial }: { initial: Config }) {
   const [values, setValues] = useState(initial);
+  const localDateTime = (value: string) => {
+    const date = new Date(value);
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+      .toISOString().slice(0, 19);
+  };
+  const [scanSince, setScanSince] = useState(() => localDateTime(initial.automatic_scan_since));
   const [key, setKey] = useState("");
   const [clear, setClear] = useState(false);
   const [command, setCommand] = useState(JSON.stringify(initial.codex_command));
@@ -85,6 +93,7 @@ function SettingsForm({ initial }: { initial: Config }) {
             "/api/settings",
             {
               ...settings,
+              automatic_scan_since: new Date(scanSince).toISOString(),
               codex_command: JSON.parse(command),
               model: settings.model || null,
               api_key: key,
@@ -93,13 +102,14 @@ function SettingsForm({ initial }: { initial: Config }) {
             "PUT",
           );
           setValues(saved);
+          setScanSince(localDateTime(saved.automatic_scan_since));
           setKey("");
           setClear(false);
         }, "设置已保存");
       }}
     >
       <h2>整理偏好</h2>
-      <p>自动采集只保存原文。模型仅在手动转换或开启的阈值满足时运行。</p>
+      <p>手动模式只分析所选会话；自动模式定时整理新增轨迹并更新相关 Skill。</p>
       <fieldset>
         <legend>01 · 选择整理经验的模型</legend>
         <p className="muted small">使用本机 Codex，或连接自己的模型 API。</p>
@@ -114,6 +124,7 @@ function SettingsForm({ initial }: { initial: Config }) {
             >
               <option value="codex">Codex 新建会话</option>
               <option value="api">API 模型</option>
+              <option value="ollama">本机 Ollama</option>
             </select>
           </label>
           {values.executor === "api" && (
@@ -132,9 +143,6 @@ function SettingsForm({ initial }: { initial: Config }) {
               </label>
               {text("api_url", "API 地址")}
               {text("api_model", "API 模型")}
-              {text("max_tokens", "最大输出（tokens）", "number")}
-              {text("context_window", "上下文窗口（tokens）", "number")}
-              <p className="muted small">最大输出随请求发送；上下文窗口用于记录模型容量，由模型服务判断是否超限。</p>
               <label>
                 API key（
                 {values.api_key_configured ? "已配置，留空保留" : "未配置"}）
@@ -155,40 +163,76 @@ function SettingsForm({ initial }: { initial: Config }) {
               </label>
             </>
           )}
+          {values.executor === "ollama" && (
+            <>
+              {text("ollama_model", "Ollama 模型名称")}
+              <p className="muted small">
+                连接本机 127.0.0.1:11434，先运行 Ollama
+                并下载所填模型。不会自动改用云端模型。
+              </p>
+            </>
+          )}
           {values.executor === "codex" &&
             text("model", "Codex 模型（空值使用默认）")}
         </div>
       </fieldset>
       <fieldset>
-        <legend>02 · 自动整理</legend>
+        <legend>02 · 工作模式</legend>
+        <label>
+          分析模式
+          <select
+            value={values.capture_mode}
+            onChange={(e) =>
+              setValues({ ...values, capture_mode: e.target.value })
+            }
+          >
+            <option value="manual">手动选择会话</option>
+            <option value="automatic">自动监听并分析</option>
+          </select>
+        </label>
         <p className="muted small">
-          关闭时由你手动发起。开启后，累计到设定数量会自动整理；Wiki
-          自动转换只更新项目汇总 Skill，专题 Skill 在知识文档中手动更新。
+          手动：选择会话 → 提取 Wiki → 生成 Skill。自动：持续采集 → 定时分析 →
+          自动更新相关 Skill。安装到 Codex 保持独立操作。
         </p>
-        <div className="manage-grid">
-          {(
-            [
-              ["raw_auto", "自动 Raw → Wiki"],
-              ["wiki_auto", "自动 Wiki → Skill"],
-              ["auto_start", "连接 MCP 时自动启动后台"],
-            ] as const
-          ).map(([name, label]) => (
-            <label key={name}>
+        {values.capture_mode === "automatic" && (
+          <>
+            <label>
+              自动扫描起始时间
               <input
-                type="checkbox"
-                checked={values[name]}
-                onChange={(e) =>
-                  setValues({ ...values, [name]: e.target.checked })
-                }
+                type="datetime-local"
+                step="1"
+                required
+                value={scanSince}
+                onChange={(e) => setScanSince(e.target.value)}
               />
-              {label}
             </label>
-          ))}
-          {values.raw_auto &&
-            text("raw_threshold", "累计多少个已结束轮次后整理", "number")}
-          {values.wiki_auto &&
-            text("wiki_threshold", "累计多少个知识版本后生成 Skill", "number")}
-        </div>
+            <button type="button" onClick={() => setScanSince(localDateTime(new Date().toISOString()))}>
+              使用当前时间
+            </button>
+            <p className="muted small">
+              按本地时区填写，保存后固定。仅采集最后修改时间不早于此时间的会话文件，
+              符合条件的会话保留完整原文；已采集内容按原进度继续。手动导入历史不受限制。
+            </p>
+            <p className="muted small">
+              自动分析需等待同一会话连续 1 小时没有新增记录，且所有可识别轮次均已结束。
+              等待执行期间出现新记录会重新计时；手动执行可立即开始。
+            </p>
+            {text("analysis_interval_minutes", "自动分析间隔（分钟）", "number")}
+          </>
+        )}
+        <p className="muted small">
+          模型按需继续读取材料，完成分析后结束本批；失败批次保留输入，不自动反复重试。
+        </p>
+        <label>
+          <input
+            type="checkbox"
+            checked={values.auto_start}
+            onChange={(e) =>
+              setValues({ ...values, auto_start: e.target.checked })
+            }
+          />
+          连接 MCP 时启动后台
+        </label>
       </fieldset>
       <details className="settings-advanced">
         <summary>高级设置 · 目录、超时与启动命令</summary>
@@ -282,7 +326,7 @@ export function Manage({
           <h3>连接与配置</h3>
           <p>
             运行 <code>wikiskill-codex init</code>，将输出的 mcp_command 注册到
-            Codex。连接后，新对话会自动采集。
+            Codex。可选择手动处理，或在设置中开启自动监听。
           </p>
           <a href={href("system", { project })}>
             前往设置 <ArrowRight size={14} />
@@ -311,7 +355,7 @@ export function Manage({
       <div className="guide-footer">
         <span className="muted small">
           {snapshot.worker.status === "online"
-            ? "后台已连接，正在自动采集新记录"
+            ? "后台已连接，按所选模式工作"
             : "需要后台运行才能采集记录和执行整理"}
         </span>
         <a href={href("system", { project })}>管理后台 →</a>
@@ -320,6 +364,7 @@ export function Manage({
   );
   return (
     <div className="manage-workspace">
+      <SessionPicker refresh={refresh} />
       <section className={`workspace-hero ${selected ? "is-project" : ""}`}>
         <div className="workspace-title">
           <div className="eyebrow">
@@ -865,7 +910,12 @@ function WikiPanel({
           refresh={refresh}
         />
       )}
-      <WikiTransfer key={project} project={project} selected={selected} refresh={refresh} />
+      <WikiTransfer
+        key={project}
+        project={project}
+        selected={selected}
+        refresh={refresh}
+      />
       <ErrorMessage error={list.error} />
       <div className="manage-split">
         <div>
@@ -976,7 +1026,9 @@ function WikiEditor({
               `/api/projects/${project}/wiki/${encodeURIComponent(name)}`,
             );
             if (saved.body !== body) {
-              throw new Error("保存后正文已发生变化。已保留当前输入，请重新打开文档后核对。");
+              throw new Error(
+                "保存后正文已发生变化。已保留当前输入，请重新打开文档后核对。",
+              );
             }
             setExpected(saved.digest);
             setSavedBody(saved.body);
@@ -1014,11 +1066,18 @@ function WikiEditor({
         </button>
       </form>
       {action.status}
-      {dirty && <p className="muted small" role="status">有未保存的修改</p>}
+      {dirty && (
+        <p className="muted small" role="status">
+          有未保存的修改
+        </p>
+      )}
       <details>
         <summary>正文预览</summary>
         <Markdown text={body} />
       </details>
+      {expected !== null && (
+        <WikiSources key={name} project={project} name={name} />
+      )}
       {expected !== null && (
         <div className="manage-actions">
           <button

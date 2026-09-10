@@ -168,13 +168,19 @@ class ServiceProcess:
         states = {name: "running" if child.poll() is None and
                   _held(self.root / f"locks/{name}-process.lock") else "stopped"
                   for name, child in self.children.items()}
-        return {"identity": digest(str(self.root)), "state": "running" if
-                len(states) == 2 and all(s == "running" for s in states.values()) else "degraded",
+        automatic = Config.load(self.root).capture_mode == 'automatic'
+        if not automatic:
+            states['collector'] = 'disabled'
+        ready = states.get('worker') == 'running' and (not automatic or states.get('collector') == 'running')
+        return {"identity": digest(str(self.root)), "state": "running" if ready else "degraded",
                 "url": f"http://127.0.0.1:{self.port}", "pid": os.getpid(), **states}
 
     def ensure(self):
         with self.mutex:
-            for name in ("collector", "worker"):
+            automatic = Config.load(self.root).capture_mode == 'automatic'
+            if not automatic and 'collector' in self.children:
+                _terminate(self.children.pop('collector'))
+            for name in (('collector', 'worker') if automatic else ('worker',)):
                 child = self.children.get(name)
                 if child is None or child.poll() is not None:
                     if _held(self.root / f"locks/{name}-process.lock"):

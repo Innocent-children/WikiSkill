@@ -1,5 +1,6 @@
 export type Page<T> = { items: T[]; next_offset: number | null };
 export type Queue = {
+  next_analysis_at?: number;
   pending: number;
   batched: number;
   waiting: number;
@@ -41,10 +42,10 @@ export type Worker = {
   error?: string | null;
 };
 export type Config = {
-  raw_threshold: number;
-  wiki_threshold: number;
-  raw_auto: boolean;
-  wiki_auto: boolean;
+  capture_mode: string;
+  automatic_scan_since: string;
+  analysis_interval_minutes: number;
+  ollama_model: string;
   codex_home: string;
   install_directory: string;
   executor: string;
@@ -52,8 +53,6 @@ export type Config = {
   api_url: string;
   api_model: string;
   api_key_configured: boolean;
-  max_tokens: number;
-  context_window: number;
   model: string | null;
   timeout_seconds: number;
   poll_seconds: number;

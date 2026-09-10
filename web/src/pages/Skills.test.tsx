@@ -317,6 +317,8 @@ const detail: SkillDetail = {
 it("keeps filters through detail and versions while preserving download and rollback", async () => {
   const fetcher = vi.fn(async (url: string, options?: RequestInit) => {
     if (options?.method === "POST") return Response.json({});
+    if (url.endsWith("/evolution"))
+      return Response.json({ sources: [], feedback: [] });
     if (url.includes("/versions/"))
       return Response.json({ ...version, id: url.split("/").at(-1) });
     return Response.json(detail);
@@ -351,6 +353,9 @@ it("keeps filters through detail and versions while preserving download and roll
   expect(download.getAttribute("href")).toBe(
     "/api/skills/shared/versions/v2/file?side=after&name=SKILL.md",
   );
+  fireEvent.change(screen.getByLabelText("恢复原因"), {
+    target: { value: "新版本导致测试失败" },
+  });
   fireEvent.click(screen.getByRole("button", { name: "恢复选定历史版本" }));
   await screen.findByText("已恢复选定版本的完整目录");
   const write = fetcher.mock.calls.find(
@@ -360,6 +365,7 @@ it("keeps filters through detail and versions while preserving download and roll
   expect(JSON.parse(write[1]!.body as string)).toEqual({
     version_id: "v2",
     side: "after",
+    reason: "新版本导致测试失败",
   });
   fireEvent.click(screen.getByRole("link", { name: "全部 Skill" }));
   await waitFor(() => count(1, 3));

@@ -2,11 +2,11 @@
 
 ## 安装与启动
 
-安装后运行 `wikiskill`，自动初始化并启动面板、采集器与转换 worker；从源码运行可用 `uv sync --frozen`、`uv run --frozen wikiskill`。`wikiskill` 与 `wikiskill-codex` 都使用同一 CLI。
+安装后运行 `wikiskill`，自动初始化并启动面板与转换 worker，自动模式另行启动采集器；从源码运行可用 `uv sync --frozen`、`uv run --frozen wikiskill`。`wikiskill` 与 `wikiskill-codex` 都使用同一 CLI。
 
 需要 MCP 工具时，运行 `wikiskill init`，将输出的 `mcp_command` 注册为 Codex 本机 stdio MCP。重新连接后自动唤醒整套后台并复用已有实例，不打开浏览器。自动采集独立于 MCP 连接。也可用 `--root /absolute/data` 指定隔离目录；MCP 和 WebUI 必须使用相同目录。
 
-`start` 启动整套后台但不打开浏览器；`status` 包含实际地址与运行状态；`stop` 停止托管后台并保留数据。`auto_start=false` 时，仍可主动运行 `wikiskill` 或 `start`。自动转换开关保持独立。默认端口 8765 被占用时自动选择空闲端口；以命令输出的地址为准。
+`start` 启动整套后台但不打开浏览器；`status` 包含实际地址与运行状态；`stop` 停止托管后台并保留数据。`auto_start=false` 时，仍可主动运行 `wikiskill` 或 `start`。工作模式与后台自动唤醒保持独立。默认端口 8765 被占用时自动选择空闲端口；以命令输出的地址为准。
 
 `worker --once` 执行当前可运行批次；`collector --once` 扫描一次轨迹。`web` 保留为前台页面开发入口。单独运行的 worker/collector 由启动终端管理，统一服务发现进程锁冲突会提示先停止独立进程。停止会中断当前模型执行，重启沿用已有批次恢复逻辑。若后续 MCP 操作又唤醒了服务，可关闭设置中的自动启动开关。
 
@@ -29,6 +29,7 @@ doctor 可在初始化前或配置损坏时独立运行。它只读取配置及�
 执行方式按当前配置检查：
 
 - `codex`：`codex_command` 首项必须能找到且可执行。相对命令路径、相对 PATH 项按数据目录解释，与实际启动 Codex 的工作目录一致。`model` 为 null 时使用 Codex 默认模型。
+- `ollama`：检查本机模型名称是否配置；不发起请求、不验证 Ollama 服务或模型是否可用。
 - `api`：检查 API 协议、地址和端口格式，并要求填写 `api_model`。没有 Codex 命令只提示。`api_key` 只显示“已配置/未配置”；为空时提示需要认证的服务应填写 key，免认证服务可以留空。
 
 默认输出逐项列出状态及修复建议。JSON 输出包含 `ok`（布尔值）、`executor`（`codex`、`api`，无法读取有效配置时为 null）和 `checks` 数组。
@@ -46,7 +47,7 @@ doctor 可在初始化前或配置损坏时独立运行。它只读取配置及�
 
 ## Wiki 和 Skill
 
-页面手动提交固定输入，后续新增内容留待下一批。失败批次保留输入，页面可重试现有结果或使用当前设置重新生成。模型输入预算只限制批次和模型请求，不改写、截断数据库原文。单条记录或上下文超过预算时明确失败，可提高预算后重新生成。
+页面手动提交固定输入，后续新增内容留待下一批。失败批次保留输入，页面可重试现有结果或使用当前设置重新生成。应用不按 token 或调用次数限制分析，原文完整保留；模型服务报告失败时，保留输入供手动重试。
 
 Wiki 编辑比较读取时的正文摘要值，冲突时拒绝覆盖。实际正文变化均记录版本，回退到旧正文也产生新版本。Skill 发布沿用锁、before/after 完整快照及 prepared/applied 恢复记录，保留二进制资源和权限。
 
@@ -63,6 +64,12 @@ Wiki 编辑比较读取时的正文摘要值，冲突时拒绝覆盖。实际正
 
 ## 当前配置
 
-设置页保存唯一当前格式。字段包括 `raw_auto`、`wiki_auto`、`raw_threshold`、`wiki_threshold`、`executor`、`api_provider`、`api_url`、`api_model`、`api_key`、`codex_home`、`install_directory`、`codex_command`、`model`、`input_budget`、`timeout_seconds`、`poll_seconds`、`auto_start`。API 支持 Chat Completions 和 Gemini；Codex 使用当前本机登录。
+设置页保存唯一当前格式。模式使用 `capture_mode=manual/automatic`；定时间隔使用 `analysis_interval_minutes`。执行方式 `executor` 可选 codex、api、ollama；本机 Ollama 使用 `ollama_model`。API 使用 `api_provider`、`api_url`、`api_model`、`api_key`，支持 Chat Completions 和 Gemini。其他设置为 `codex_home`、`install_directory`、`codex_command`、`model`、`timeout_seconds`、`poll_seconds`、`auto_start`。当前流程见 [演化流程](evolution.md)。
 
 旧配置不做识别或兼容。升级时停止旧后台，执行 `init --reset-settings` 并重新配置。旧数据和历史不删除；已有旧摘要批次仅保留查询，不进入新轨迹自动调度。
+
+## 结构化生成与模型响应
+
+Ollama 使用原生 `/api/chat`：Wiki 整理传入 JSON Schema，Skill 生成使用 read_file/finish 工具；本机 Qwen3.5 关闭 thinking。Codex 的 Wiki 整理继续使用 outputSchema，Skill 生成启用 app-server 动态工具，仅向模型开放当前批次材料。原始论文提示词与项目适配说明分开存放。
+
+解析失败时，在执行记录展开“模型响应原文与工具调用”，检查正文、思考字段、工具参数和结束原因。修复执行环境或更新代码后，选择“使用当前设置重新生成”，创建新的模型执行尝试并保留旧响应。无需清空 Raw、Wiki 或 Skill。

@@ -77,7 +77,11 @@ def create_app(root: str | Path = "~/.wikiskill") -> FastAPI:
     def update_settings(values: dict):
         from .settings import save_settings
         value = save_settings(view.root, values)
-        runtime().wake()
+        current = getattr(app.state, 'services', None)
+        if current:
+            current.ensure()
+        else:
+            runtime().wake()
         return value
 
     @app.post("/api/start")
@@ -92,11 +96,27 @@ def create_app(root: str | Path = "~/.wikiskill") -> FastAPI:
         value = current.status() if current else service_status(view.root)
         return {k: v for k, v in value.items() if k != "identity"}
 
+    @app.get('/api/sessions')
+    def local_sessions(q: str = '', offset: Offset = 0, limit: Limit = 20):
+        from .session_import import SessionImport
+        from .config import Config
+        return SessionImport(Config.load(view.root)).catalog(q, offset, limit)
+
+    @app.post('/api/sessions/import')
+    def import_sessions(values: dict):
+        from .session_import import SessionImport
+        from .config import Config
+        if set(values) != {'ids', 'analyze'}:
+            raise ValueError('请提供选定会话及是否分析')
+        return SessionImport(Config.load(view.root)).import_selected(**values)
+
     @app.post("/api/history-import")
     def history_import():
         from .capture import Collector
         current = runtime()
         result = Collector(current.config).request_history()
+        if current.config.capture_mode == 'manual':
+            Collector(current.config).scan()
         current.wake()
         return result
 
@@ -200,6 +220,13 @@ def create_app(root: str | Path = "~/.wikiskill") -> FastAPI:
             raise ValueError("Supply change_id and expected digest")
         return runtime().rollback_wiki(project, **values)
 
+    @app.post('/api/jobs/{job_id}/run')
+    def run_manually(job_id: str):
+        current = runtime()
+        result = current.run_manually(job_id)
+        current.wake()
+        return result
+
     @app.post("/api/jobs/{job_id}/retry")
     def retry(job_id: str, values: dict):
         if set(values) != {"regenerate"} or type(values["regenerate"]) is not bool:
@@ -223,9 +250,33 @@ def create_app(root: str | Path = "~/.wikiskill") -> FastAPI:
 
     @app.post("/api/skills/{skill_id}/rollback")
     def rollback(skill_id: str, values: dict):
-        if set(values) != {"version_id", "side"}:
+        if set(values) - {"version_id", "side", "reason"} or not {"version_id", "side"} <= set(values):
             raise ValueError("Supply version_id and side")
         return runtime().skills.rollback(skill_id, **values)
+
+    @app.get('/api/projects/{project}/wiki/{name}/sources')
+    def wiki_sources(project: str, name: str, offset: Offset = 0, limit: Limit = 20):
+        from .evolution import source_ids
+        from .views import rows, page
+        with view.read() as db:
+            view.require_project(db, project)
+            ids = source_ids(db, project, name)
+            records = rows(db, 'SELECT id,session,turn_id,original FROM trace_records WHERE project=? AND id IN (SELECT value FROM json_each(?)) ORDER BY id LIMIT ? OFFSET ?', (project, json.dumps(ids), limit + 1, offset))
+            for record in records:
+                record['text'] = record.pop('original').decode('utf-8', errors='replace')
+            return page(records, offset, limit)
+
+    @app.get('/api/skills/{skill_id}/evolution')
+    def evolution(skill_id: str):
+        from .evolution import Evolution
+        return Evolution.read_detail(view.root, skill_id)
+
+    @app.post('/api/skills/{skill_id}/feedback')
+    def skill_feedback(skill_id: str, values: dict):
+        from .evolution import Evolution
+        if set(values) != {'version_id', 'kind', 'body'}:
+            raise ValueError('请提供版本、反馈类型和具体原因')
+        return Evolution(runtime().store).feedback(skill_id, **values)
 
     @app.middleware("http")
     async def local_requests(request: Request, call_next):
@@ -288,6 +339,16 @@ def create_app(root: str | Path = "~/.wikiskill") -> FastAPI:
     @app.get("/api/jobs/{job_id}/events")
     def job_events(job_id: str, offset: Offset = 0, limit: Limit = 50):
         return view.events(job_id, offset, limit)
+
+    @app.get('/api/jobs/{job_id}/model-responses')
+    def model_responses(job_id: str, offset: Offset = 0, limit: Limit = 20):
+        from .views import page
+        with view.read() as db:
+            view.require_job(db, job_id)
+        directory = view.root / 'reports' / 'model-responses' / job_id
+        paths = sorted(directory.glob('*.json'), key=lambda p: p.stat().st_mtime_ns, reverse=True)
+        values = [json.loads(path.read_text(encoding='utf-8')) for path in paths[offset:offset + limit + 1]]
+        return page(values, offset, limit)
 
     @app.get("/api/jobs/{job_id}/report")
     def report(job_id: str):

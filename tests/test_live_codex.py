@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from wikiskill.live.codex import CodexSession, SKILL_SCHEMA
+from wikiskill.live.codex import CodexSession, WIKI_SCHEMA
 from wikiskill.live.config import Config
 
 
@@ -37,9 +37,9 @@ class LiveCodexTests(unittest.TestCase):
             {"method": "turn/completed", "params": {"threadId": "thr-1", "turn": {"id": "turn-1", "status": "completed"}}}
         ]:
             self.session.messages.put(message)
-        result = self.session.turn("test", SKILL_SCHEMA)
+        result = self.session.turn("test", WIKI_SCHEMA)
         self.assertEqual(json.loads(result)["summary"], "ok")
-        self.assertEqual(self.session.send.call_args.args[0]["params"]["outputSchema"], SKILL_SCHEMA)
+        self.assertEqual(self.session.send.call_args.args[0]["params"]["outputSchema"], WIKI_SCHEMA)
 
     def test_errors_and_interactive_requests_are_explicit(self):
         self.session.messages.put({"id": 1, "error": {"message": "unavailable"}})

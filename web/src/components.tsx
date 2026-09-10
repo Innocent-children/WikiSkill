@@ -199,27 +199,14 @@ export function QueueMeter({
   project: string;
   skill?: string;
 }) {
-  const ratio = queue.threshold
-    ? Math.min(100, (queue.pending / queue.threshold) * 100)
-    : 0;
   return (
     <div className="queue-meter">
       <div className="meter-title">
         <span>{label}</span>
         <span className="tabular">
           <strong>{queue.pending}</strong>
-          <span className="muted"> / {queue.threshold ?? "—"}</span>
+          <span className="muted"> 条待处理</span>
         </span>
-      </div>
-      <div
-        className="meter-track"
-        role="progressbar"
-        aria-label={`${label}待处理数量`}
-        aria-valuenow={queue.pending}
-        aria-valuemin={0}
-        aria-valuemax={Math.max(queue.threshold ?? 1, queue.pending, 1)}
-      >
-        <span style={{ width: `${ratio}%` }} />
       </div>
       <div className="meter-note">
         <span className={queue.reason === "failed" ? "text-danger" : ""}>

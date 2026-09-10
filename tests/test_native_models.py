@@ -52,6 +52,7 @@ class GeminiTests(unittest.TestCase):
             self.assertEqual(captured[0][2], "test-only")
             self.assertIn("functionDeclarations", captured[0][1]["tools"][0])
             self.assertEqual(captured[0][1]["generationConfig"]["seed"], 7)
+            self.assertNotIn("maxOutputTokens", captured[0][1]["generationConfig"])
             contents = captured[1][1]["contents"]
             self.assertEqual(contents[1]["parts"][1]["thoughtSignature"], "opaque-signature")
             self.assertEqual(contents[2]["parts"][0]["functionResponse"]["id"], "provider-call")

@@ -24,7 +24,6 @@ class ModelConfig:
     model: str
     api_key_env: str = "WIKISKILL_API_KEY"
     temperature: float = 0.0
-    max_tokens: int = 8192
     timeout_seconds: float = 120
     retries: int = 2
     seed: int | None = None
@@ -42,8 +41,6 @@ class ModelConfig:
             raise ValueError("api_key_env must be an environment variable name, or empty")
         if not math.isfinite(self.temperature) or not 0 <= self.temperature <= 2:
             raise ValueError("temperature must be between 0 and 2")
-        if type(self.max_tokens) is not int or self.max_tokens < 1:
-            raise ValueError("max_tokens must be a positive integer")
         if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         if type(self.retries) is not int or not 0 <= self.retries <= 5:
@@ -73,7 +70,7 @@ class ChatModel(Protocol):
     @property
     def identity(self) -> dict: ...
 
-    def complete(self, messages: list[dict], tools: list[dict]) -> ChatResponse: ...
+    def complete(self, messages: list[dict], tools: list[dict], schema: dict | None = None) -> ChatResponse: ...
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -86,15 +83,18 @@ class ChatCompletionsModel:
         self.config = config
         self.api_key = api_key
         self.opener = urllib.request.build_opener(_NoRedirect())
+        self.on_response = None
 
     @property
     def identity(self) -> dict:
         return {"adapter": "chat_completions", **asdict(self.config)}
 
-    def complete(self, messages: list[dict], tools: list[dict]) -> ChatResponse:
+    def complete(self, messages: list[dict], tools: list[dict], schema: dict | None = None) -> ChatResponse:
         config = self.config
         payload = {"model": config.model, "messages": messages, "temperature": config.temperature,
-                   "max_tokens": config.max_tokens, "stream": False}
+                   "stream": False}
+        if schema is not None:
+            payload['response_format'] = {'type': 'json_schema', 'json_schema': {'name': 'wiki_maintenance', 'schema': schema}}
         if config.seed is not None:
             payload["seed"] = config.seed
         if tools:
@@ -112,6 +112,8 @@ class ChatCompletionsModel:
             try:
                 with self.opener.open(request, timeout=config.timeout_seconds) as response:
                     result = json.loads(response.read())
+                if self.on_response:
+                    self.on_response(result)
                 return self._decode(result)
             except urllib.error.HTTPError as exc:
                 retryable = exc.code == 429 or 500 <= exc.code <= 599
@@ -173,6 +175,7 @@ class GeminiModel:
     def __init__(self, config: ModelConfig, api_key: str | None = None):
         self.config = config
         self.api_key = api_key
+        self.on_response = None
 
     @property
     def identity(self) -> dict:
@@ -219,10 +222,12 @@ class GeminiModel:
                 raise ModelError(f"Unsupported conversation role: {role}")
         return contents, "\n\n".join(instructions)
 
-    def complete(self, messages: list[dict], tools: list[dict]) -> ChatResponse:
+    def complete(self, messages: list[dict], tools: list[dict], schema: dict | None = None) -> ChatResponse:
         config = self.config
         contents, system = self._contents(messages)
-        generation = {"temperature": config.temperature, "maxOutputTokens": config.max_tokens}
+        generation = {"temperature": config.temperature}
+        if schema is not None:
+            generation.update(responseMimeType='application/json', responseJsonSchema=schema)
         if config.seed is not None:
             generation["seed"] = config.seed
         if config.thinking_budget is not None or config.thinking_level is not None:
@@ -253,6 +258,8 @@ class GeminiModel:
         try:
             response = request_json(url, payload=payload, headers=headers, timeout=config.timeout_seconds,
                                     retries=config.retries, service="Gemini")
+            if self.on_response:
+                self.on_response(response)
             candidate = response["candidates"][0]
             parts = candidate["content"]["parts"]
             if not isinstance(parts, list) or not parts:

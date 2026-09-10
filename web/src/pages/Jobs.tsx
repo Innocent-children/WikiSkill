@@ -1,3 +1,4 @@
+import { ModelResponses } from "../ModelResponses";
 import { useState } from "react";
 import { ArrowDownToLine, ArrowRight, CircleAlert, Check } from "lucide-react";
 import { mutate, useResource } from "../api";
@@ -87,7 +88,7 @@ export function Jobs({ route, revision }: { route: Route; revision: number }) {
           <Loading />
         ) : (
           <Empty title="没有符合条件的批次">
-            可以调整筛选条件，或等待项目内容达到阈值。
+            可以调整筛选条件，或在知识工作台选择会话进行分析。
           </Empty>
         )}
         {jobs.data && (
@@ -162,6 +163,24 @@ export function JobDetail({
           </button>
         </div>
       )}
+      {data.state === "queued" && (
+        <div className="manage-actions">
+          <button
+            disabled={action.busy}
+            onClick={() =>
+              void action.run(
+                () => mutate(`/api/jobs/${id}/run`),
+                "已手动提交执行",
+              )
+            }
+          >
+            执行此批
+          </button>
+          <span className="muted small">
+            切换到手动模式后，尚未开始的自动批次会等待手动执行或重新开启自动模式。
+          </span>
+        </div>
+      )}
       {action.status}
       <div className="detail-heading">
         <div>
@@ -209,6 +228,27 @@ export function JobDetail({
           </span>
         </div>
       )}
+      {data.report?.analysis && typeof data.report.analysis === "object" ? (
+        <div className="panel document-panel">
+          <h3>本批模型用量</h3>
+          <p>
+            请求次数：
+            {String(
+              (data.report.analysis as Record<string, unknown>).calls ??
+                "未记录",
+            )}{" "}
+          </p>
+          <p className="muted small">
+            API / Ollama
+            返回的实际用量及按需读取记录见详情。Codex 按会话轮次计数，内部模型调用次数和未提供的用量保持未知。
+          </p>
+          <details>
+            <summary>读取记录与服务用量</summary>
+            <Json value={data.report.analysis} />
+          </details>
+        </div>
+      ) : null}
+      <ModelResponses key={id} job={id} revision={revision + localRevision}/>
       <DocumentTabs
         values={[
           { id: "overview", label: "处理过程" },

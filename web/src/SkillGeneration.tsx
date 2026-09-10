@@ -11,6 +11,7 @@ type Candidate = {
   skill_md: string;
   digest: string;
   matched_terms: string[];
+  linked_pages?: string[];
   score: number;
   projects: { id: string; name: string }[];
 };
@@ -176,8 +177,9 @@ export function SkillGeneration({
                 )}
                 <h3>查找可合并的已有 Skill</h3>
                 <p className="muted small">
-                  搜索 WikiSkill 管理的所有项目
-                  Skill，按正文匹配词排序。匹配词用于查找，请结合职责和正文选择合并对象。
+                  搜索 WikiSkill 管理的所有项目 Skill，优先展示已关联所选 Wiki
+                  的
+                  Skill，再按正文匹配词排序。匹配词用于查找，请结合职责和正文选择合并对象。
                 </p>
                 <label>
                   搜索已有 Skill

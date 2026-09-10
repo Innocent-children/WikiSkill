@@ -58,7 +58,7 @@ def _config_repair(error: Exception) -> str:
         "Unknown config fields; use the current config format":
             "config.json 只接受当前配置字段；按使用说明移除旧字段，或备份后运行 init --reset-settings。",
         "Invalid executor or API provider":
-            "executor 使用 codex/api，api_provider 使用 chat_completions/gemini。",
+            "executor 使用 codex/api/ollama，api_provider 使用 chat_completions/gemini。",
         "api_url must be an HTTP(S) URL without credentials, query or fragment":
             "将 api_url 设为完整 HTTP(S) 地址，移除用户名、密码、查询参数及片段。",
         "API model and key must be text": "将 api_model 和 api_key 设为字符串。",
@@ -67,9 +67,9 @@ def _config_repair(error: Exception) -> str:
         "model must be null or a nonempty Codex model name":
             "将 model 设为 null（使用 Codex 默认模型）或非空模型名称。",
     }
-    for name in ("raw_threshold", "wiki_threshold", "timeout_seconds", "poll_seconds", "max_tokens", "context_window"):
+    for name in ("analysis_interval_minutes", "timeout_seconds", "poll_seconds"):
         hints[f"{name} must be a positive integer"] = f"将 {name} 设为正整数。"
-    for name in ("raw_auto", "wiki_auto", "auto_start"):
+    for name in ("auto_start",):
         hints[f"{name} must be boolean"] = f"将 {name} 设为 true 或 false。"
     for name in ("codex_home", "install_directory"):
         hints[f"{name} must be an absolute directory"] = f"将 {name} 设为绝对目录路径。"
@@ -144,7 +144,7 @@ def diagnose(root: str | Path) -> dict:
             "" if private else "将数据目录中的 config.json 权限设为 600（chmod 600）。"))
     except OSError:
         checks.append(_check("config_permissions", "error", "无法读取配置权限。", "检查 config.json 是否仍存在且可访问。"))
-    checks.append(_check("api_key", "ok" if config.api_key.strip() or executor == "codex" else "warning",
+    checks.append(_check("api_key", "ok" if config.api_key.strip() or executor in {"codex", "ollama"} else "warning",
         "已配置。" if config.api_key.strip() else "未配置。",
         "若 API 服务需要认证，请在设置页填写 api_key；免认证服务可留空。" if executor == "api" and not config.api_key.strip() else ""))
     if executor == "api":
@@ -157,6 +157,10 @@ def diagnose(root: str | Path) -> dict:
         except ValueError:
             checks.append(_check("api_endpoint", "error", "API 地址端口无效。",
                 "将 api_url 中的端口改为 0 到 65535 的整数，或省略端口。"))
+    elif executor == 'ollama':
+        checks.append(_check('ollama_model', 'ok' if config.ollama_model.strip() else 'error',
+            '已配置本机模型；未连接 Ollama。' if config.ollama_model.strip() else '未配置本机模型。',
+            '' if config.ollama_model.strip() else '在设置页填写已经下载的 Ollama 模型名称。'))
     else:
         checks.append(_check("codex_model", "ok", "已指定模型。" if config.model else "使用 Codex 默认模型。"))
     checks.append(_command_check(config))

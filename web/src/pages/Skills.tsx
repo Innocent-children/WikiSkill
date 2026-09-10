@@ -1,3 +1,4 @@
+import { SkillEvolution } from "../SkillEvolution";
 import { useAction } from "../actions";
 import { useEffect, useState } from "react";
 import {
@@ -197,6 +198,7 @@ export function SkillPage({
   revision: number;
 }) {
   const [offset, setOffset] = useState(0);
+  const [reason, setReason] = useState("");
   const [localRevision, setLocalRevision] = useState(0);
   const action = useAction(() => setLocalRevision((n) => n + 1));
   const [tab, setTab] = useState("current");
@@ -231,14 +233,24 @@ export function SkillPage({
       {action.status}
       {selected && skill.data?.enabled && (
         <div className="manage-actions">
+          <label>
+            恢复原因
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="说明为什么恢复该版本"
+              maxLength={8000}
+            />
+          </label>
           <button
-            disabled={action.busy}
+            disabled={action.busy || !reason.trim()}
             onClick={() =>
               void action.run(
                 () =>
                   mutate(`/api/skills/${route.skill}/rollback`, {
                     version_id: selected,
                     side: "after",
+                    reason,
                   }),
                 "已恢复选定版本的完整目录",
               )
@@ -287,6 +299,12 @@ export function SkillPage({
             ]}
             active={tab}
             onChange={setTab}
+          />
+          <SkillEvolution
+            key={`${data.id}/${selected}`}
+            skill={data.id}
+            version={selected}
+            revision={revision + localRevision}
           />
           <div className="skill-detail-grid">
             <div className="panel document-panel">

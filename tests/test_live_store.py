@@ -41,7 +41,7 @@ class LiveStoreTests(unittest.TestCase):
         self.assertEqual(self.runtime.store.job(job["job_id"])["inputs"], [1])
 
     def test_settings_do_not_return_key_and_reject_old_format(self):
-        config = save_settings(self.runtime.config.root, {"api_key": "test-secret", "raw_auto": True})
+        config = save_settings(self.runtime.config.root, {"api_key": "test-secret", "capture_mode": "automatic"})
         self.assertTrue(config["api_key_configured"])
         self.assertNotIn("test-secret", json.dumps(config))
         save_settings(self.runtime.config.root, {"api_key": ""})

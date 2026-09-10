@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 
 from .config import Config, digest
@@ -39,10 +40,14 @@ class Collector:
                 db.execute("INSERT OR IGNORE INTO capture_state(id,enabled) VALUES(1,?)", (time.time(),))
                 state = dict(db.execute("SELECT * FROM capture_state WHERE id=1").fetchone())
             errors, count = [], 0
+            since = datetime.fromisoformat(self.config.automatic_scan_since).timestamp()
+            state["enabled"] = since
             home = Path(self.config.codex_home).expanduser()
             for directory in (home / "sessions", home / "archived_sessions"):
                 for path in sorted(directory.rglob("*.jsonl")) if directory.exists() else []:
                     try:
+                        if not state["history_requested"] and path.stat().st_mtime < since:
+                            continue
                         count += self._file(path, state)
                     except (OSError, ValueError) as exc:
                         errors.append(f"{path.name}: {exc}")
@@ -172,7 +177,10 @@ class Collector:
         try:
             with file_lock(self.config.root / "locks" / "collector-process.lock", blocking=False):
                 while True:
-                    Collector(Config.load(self.config.root)).scan()
+                    config = Config.load(self.config.root)
+                    if config.capture_mode != 'automatic' and not once:
+                        return
+                    Collector(config).scan()
                     if once:
                         return
                     time.sleep(self.config.poll_seconds)

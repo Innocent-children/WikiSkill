@@ -2,6 +2,7 @@ import type { Job, Queue } from "./types";
 
 export const phaseNames: Record<string, string> = {
   "job.queued": "批次已入队",
+  "model.response": "收到模型响应",
   "job.started": "准备批次输入",
   "codex.connecting": "连接 Codex",
   "codex.session": "会话已创建",
@@ -51,23 +52,23 @@ export function unconfirmed(job: Job): boolean {
     !job.running_confirmed &&
     !["done", "failed"].includes(job.state) &&
     (job.state !== "queued" ||
-      (!!job.phase && !["job.queued", "job.retried"].includes(job.phase)))
+      (!!job.phase &&
+        !["job.queued", "job.retried", "job.manual"].includes(job.phase)))
   );
 }
 export function queueLabel(queue: Queue): string {
   const labels: Record<string, string> = {
     config_error: "配置读取失败",
-    disabled: "管理已关闭",
+    disabled: "等待手动选择",
     failed: "失败批次待重试",
     shared_busy: "等待共享 Skill 的其他批次",
     queued: "已入队，等待执行",
     processing: "本批正在处理",
-    ready: "已达阈值，等待调度",
+    ready: "等待自动分析",
+    scheduled: `下次分析：${time(queue.next_analysis_at)}`,
+    accumulating: "等待新增内容",
   };
-  return (
-    labels[queue.reason] ??
-    `还差 ${Math.max(0, (queue.threshold ?? 0) - queue.pending)} 条达到阈值`
-  );
+  return labels[queue.reason] ?? "等待处理";
 }
 export function time(value: number | null | undefined, full = false): string {
   return value == null

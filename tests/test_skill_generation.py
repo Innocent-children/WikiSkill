@@ -115,8 +115,8 @@ class SkillGenerationTests(unittest.TestCase):
             self.create()
         self.assertEqual(len(self.runtime.store.job(result["job_id"])["inputs"]), 1)
 
-    def test_context_window_does_not_reject_selected_pages(self):
-        small = Runtime(replace(self.runtime.config, context_window=1), FakeSession)
+    def test_selected_pages_are_not_rejected_by_local_token_limits(self):
+        small = Runtime(self.runtime.config, FakeSession)
         flow = SkillGeneration(small)
         preview = flow.preview(self.key, ["build", "tests"])
         expected = {p["name"]: p["digest"] for p in preview["pages"]}
@@ -125,7 +125,7 @@ class SkillGenerationTests(unittest.TestCase):
         self.assertEqual(small.store.job(result["job_id"])["state"], "done")
         self.assertEqual(len(small.store.job(result["job_id"])["inputs"]), 2)
 
-    def test_failure_retry_keeps_selection_and_auto_only_updates_summary(self):
+    def test_failure_retry_keeps_selection_and_auto_targets_unlinked_pages(self):
         result = self.create()
         FakeSession.fail_generate = True
         self.runtime.run_job(result["job_id"])
@@ -136,11 +136,11 @@ class SkillGenerationTests(unittest.TestCase):
         job = self.runtime.store.job(result["job_id"])
         self.assertEqual(job["state"], "done")
         self.assertNotIn("UNSELECTED", str(job["context"]))
-        auto = Runtime(replace(self.runtime.config, wiki_auto=True, wiki_threshold=1), FakeSession)
+        auto = Runtime(replace(self.runtime.config, capture_mode="automatic"), FakeSession)
         auto.schedule()
         jobs = self.runtime.store.rows("SELECT * FROM jobs WHERE state='queued'")
-        self.assertEqual(len(jobs), 1)
-        self.assertNotEqual(jobs[0]["skill"], result["skill_id"])
+        self.assertEqual(len(jobs), 2)
+        self.assertTrue(all(j["skill"] != result["skill_id"] for j in jobs))
 
     def test_http_preview_and_submit_new_or_merge(self):
         with TestClient(create_app(self.runtime.config.root), base_url="http://127.0.0.1") as client, patch.object(Runtime, "wake"):

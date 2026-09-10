@@ -121,7 +121,12 @@ class ReadView:
                 counts = db.execute("SELECT count(*),sum(consumed_by IS NULL) FROM trace_records WHERE project=?", (key,)).fetchone()
                 batched = (db.execute("SELECT count(*) FROM trace_records WHERE project=? AND consumed_by IS NULL "
                                       "AND id IN (SELECT value FROM json_each(?))", (key, raw["inputs"])).fetchone()[0] if raw else 0)
-                project["raw"] = self.queue(counts[1] or 0, batched, config.raw_threshold if config else None, raw, key, config.raw_auto if config else None)
+                project["raw"] = self.queue(counts[1] or 0, batched, 1 if config else None, raw, key, config.capture_mode == "automatic" if config else None)
+                if config and config.capture_mode == 'automatic' and raw is None:
+                    scheduled = db.execute('SELECT last_run FROM automatic_analysis WHERE project=?', (key,)).fetchone()
+                    due = scheduled[0] + config.analysis_interval_minutes * 60 if scheduled else time.time()
+                    project['raw']['next_analysis_at'] = due
+                    project['raw']['reason'] = 'scheduled' if due > time.time() else 'ready'
                 project["raw"]["ended_turns"] = db.execute("SELECT count(DISTINCT t.id) FROM trace_turns t JOIN trace_records r ON r.turn_id=t.id WHERE t.project=? AND t.ended=1 AND r.consumed_by IS NULL", (key,)).fetchone()[0]
                 project["observation_count"] = counts[0]
                 project["raw_count"] = counts[0]
@@ -139,7 +144,7 @@ class ReadView:
                     pending = db.execute(pending_sql, args).fetchone()[0]
                     batched = (db.execute(pending_sql + " AND w.id IN (SELECT value FROM json_each(?))",
                                           (*args, active["inputs"])).fetchone()[0] if active and active["project"] == key else 0)
-                    skill["wiki"] = self.queue(pending, batched, config.wiki_threshold if config else None, active, key, (skill["enabled"] and config.wiki_auto and skill["name"] == f"wikiskill-{key}") if config else None)
+                    skill["wiki"] = self.queue(pending, batched, 1 if config else None, active, key, (skill["enabled"] and config.capture_mode == "automatic") if config else None)
                     skill["version_count"] = db.execute("SELECT count(*) FROM versions WHERE skill=?", (skill["id"],)).fetchone()[0]
                     project["skills"].append(skill)
                 recent = db.execute("SELECT max(created) FROM raw WHERE project=?", (key,)).fetchone()[0]
@@ -160,7 +165,7 @@ class ReadView:
                          "(SELECT max(created) FROM runtime_events e WHERE e.job_id=j.id) updated_at," if events else
                          "NULL phase,NULL updated_at,")
         sql = ("SELECT j.id,j.project,p.name project_name,j.stage,j.skill,s.path skill_path,j.state,j.created,j.thread_id,j.error,"
-               "j.report_sent,json_array_length(j.inputs) input_count,json_extract(j.report,'$.outcome') outcome,"
+               "j.report_sent,CASE WHEN j.stage='skill' AND j.context IS NOT NULL THEN json_array_length(j.context,'$.changes') ELSE json_array_length(j.inputs) END input_count,json_extract(j.report,'$.outcome') outcome,"
                "json_extract(j.report,'$.summary') summary,json_extract(j.report,'$.report_error') report_error,"
                "(SELECT state FROM versions v WHERE v.job_id=j.id) publication_state,"
                "(SELECT id FROM versions v WHERE v.job_id=j.id) version_id," + event_columns +
@@ -222,6 +227,11 @@ class ReadView:
     def inputs(self, job_id: str, offset: int = 0, limit: int = 50) -> dict:
         with self.read() as db:
             job = self.require_job(db, job_id)
+            if job['stage'] == 'skill':
+                context = db.execute('SELECT context FROM jobs WHERE id=?', (job_id,)).fetchone()[0]
+                if context:
+                    selected = json.loads(context).get('changes', [])
+                    return page(selected[offset:offset + limit + 1], offset, limit)
             if job["stage"] == "raw":
                 sql = ("SELECT id,source raw_id,session source_id,original body,consumed_by FROM trace_records "
                        "WHERE project=? AND id IN (SELECT value FROM json_each(?)) ORDER BY id LIMIT ? OFFSET ?")
