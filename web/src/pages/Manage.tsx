@@ -194,6 +194,21 @@ function SettingsForm({ initial }: { initial: Config }) {
           手动：选择会话 → 提取 Wiki → 生成 Skill。自动：持续采集 → 定时分析 →
           自动更新相关 Skill。安装到 Codex 保持独立操作。
         </p>
+        <label>
+          每批最大轮次数
+          <input
+            type="number"
+            min={1}
+            step={1}
+            required
+            value={values.max_turns_per_batch}
+            onChange={(e) => setValues({ ...values, max_turns_per_batch: Number(e.target.value) })}
+          />
+        </label>
+        <p className="muted small">
+          手动和自动分析共用。按完整的已结束轮次依次更新 Wiki，失败后暂停同一会话的后续批次。
+          保存后用于新批次和明确重新生成；已排队批次保持原分组。单轮内容过大仍可能被模型拒绝。
+        </p>
         {values.capture_mode === "automatic" && (
           <>
             <label>
@@ -215,7 +230,7 @@ function SettingsForm({ initial }: { initial: Config }) {
             </p>
             <p className="muted small">
               会话等待时长从最近入库记录计算，同时检查源文件静默、内容已采集完毕，且所有可识别轮次均已结束。
-              等待执行期间出现新记录会重新计时；手动执行可立即开始。
+              等待执行期间出现新记录会重新计时；手动执行可跳过静默等待，仍需轮次结束并按批次顺序执行。
             </p>
             <label>
               会话等待时长（分钟）

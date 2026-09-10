@@ -68,6 +68,24 @@ class PaperProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'校验失败'):
             maintain(ctx,{**value,'append_log':None})
 
+    def test_incremental_prompt_and_patch_keep_valid_knowledge_across_batches(self):
+        ctx = context()
+        ctx['wiki'][0]['body'] = 'Use Python 3.11\nKeep the project environment'
+        prompt = maintainer_prompt(ctx)
+        self.assertIn('Preserve valid knowledge that this batch does not mention', prompt)
+        self.assertIn('later records explicitly correct an earlier conclusion', prompt)
+        self.assertIn('document those differences instead of overwriting', prompt)
+        self.assertIn(ctx['wiki'][0]['body'].replace('\n', '\\n'), prompt)
+        result = maintain(ctx, {
+            'create_patterns': [],
+            'update_patterns': [{'name': 'build', 'edits': [
+                {'op': 'replace', 'target': 'Use Python 3.11', 'content': 'Use Python 3.12'},
+                {'op': 'append', 'content': '\nUse Python 3.11 for the legacy deployment only'}]}],
+            'update_index': '[build](wiki/patterns/build.md)', 'append_log': 'Corrected version; retained deployment condition',
+        })
+        self.assertEqual(result['pages'][0]['body'],
+                         'Use Python 3.12\nKeep the project environment\nUse Python 3.11 for the legacy deployment only')
+
     def test_proposer_requires_real_finish_reads_and_correct_target(self):
         p=Proposer(context(),{})
         with self.assertRaisesRegex(ValueError,'目录'):

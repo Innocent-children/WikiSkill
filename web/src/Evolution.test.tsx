@@ -93,6 +93,7 @@ it("selects full automatic mode and local Ollama with an explicit interval", asy
     capture_mode: "manual",
     analysis_interval_minutes: 60,
     session_wait_minutes: 60,
+    max_turns_per_batch: 1,
     automatic_scan_since: "2026-01-01T00:00:00Z",
 
 

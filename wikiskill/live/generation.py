@@ -140,6 +140,10 @@ def maintainer_prompt(context):
                  **{f"wiki/patterns/{p['name']}.md": p['body'] for p in context['wiki']}}
     adaptation = '''\n\n## Host integration
 The workspace is a frozen database snapshot. Return the four fields specified above using the JSON schema.
+The supplied traces are one batch from a session; the current wiki includes knowledge accumulated from earlier batches.
+Preserve valid knowledge that this batch does not mention.
+When later records explicitly correct an earlier conclusion, update the existing page. If only the applicable
+conditions differ, document those differences instead of overwriting the earlier conclusion.
 Existing pattern names stay unchanged and use lowercase hyphens. Keep all index entries, and include every
 created or updated pattern. Select exact patch targets from the schema. Prefer append for new evidence or prerequisites; replace only
 incorrect advice. Preserve earlier recorded command outputs verbatim. The host preserves trace provenance separately.

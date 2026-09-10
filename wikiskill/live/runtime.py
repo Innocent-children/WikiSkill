@@ -109,8 +109,10 @@ class Runtime:
                 if not last or time.time() - last[0] >= self.config.analysis_interval_minutes * 60:
                     groups = self._raw_groups(db, self._raw_inputs(db, key, automatic=True))
                     busy = self._busy_raw_sessions(db, key)
+                    selected = [record for session, records in groups.items() if session not in busy
+                                for record in records]
                     queued = [self._enqueue(db, key, 'raw', None, records, automatic=True)
-                              for session, records in groups.items() if session not in busy]
+                              for records in self._raw_batches(db, selected)]
                     if queued:
                         created.extend(queued)
                         db.execute("INSERT OR REPLACE INTO automatic_analysis VALUES(?,?)", (key, time.time()))
@@ -142,7 +144,7 @@ class Runtime:
 
     def _raw_inputs(self, db, project, automatic=False):
         records = db.execute("SELECT r.id FROM trace_records r JOIN trace_turns t ON t.id=r.turn_id "
-            "WHERE r.project=? AND r.consumed_by IS NULL" + (" AND t.ended=1" if automatic else "") + " ORDER BY r.id", (project,)).fetchall()
+            "WHERE r.project=? AND r.consumed_by IS NULL ORDER BY r.id", (project,)).fetchall()
         inputs = [r['id'] for r in records]
         if automatic:
             now = time.time()
@@ -199,11 +201,76 @@ class Runtime:
             "AND j.state!='done' AND j.id IN (SELECT job FROM job_execution)", (project,))]
         return set(self._raw_groups(db, inputs))
 
+    def _raw_batches(self, db, inputs):
+        """Expand selected pending turns and partition each session into complete batches."""
+        rows = db.execute(
+            "SELECT r.id,r.turn_id,t.turn_key,t.ended FROM trace_records r "
+            "JOIN trace_turns t ON t.id=r.turn_id WHERE r.consumed_by IS NULL AND r.turn_id IN "
+            "(SELECT turn_id FROM trace_records WHERE id IN (SELECT value FROM json_each(?))) "
+            "ORDER BY r.id", (dumps(inputs),)).fetchall()
+        records = {r['id']: r for r in rows}
+        batches = []
+        for selected in self._raw_groups(db, list(records)).values():
+            turns, prefix = {}, []
+            previous = None
+            for record_id in selected:
+                row = records[record_id]
+                if row['turn_key'] == 'unassigned':
+                    (turns[previous]['records'] if previous is not None else prefix).append(record_id)
+                    continue
+                previous = row['turn_id']
+                if previous not in turns:
+                    turns[previous] = {'ended': row['ended'], 'records': prefix}
+                    prefix = []
+                turns[previous]['records'].append(record_id)
+            if not turns:
+                if prefix:
+                    batches.append(prefix)
+                continue
+            batch, count = [], 0
+            for turn in turns.values():
+                if not turn['ended']:
+                    break
+                batch.extend(turn['records'])
+                count += 1
+                if count == self.config.max_turns_per_batch:
+                    batches.append(sorted(batch))
+                    batch, count = [], 0
+            if batch:
+                batches.append(sorted(batch))
+        return batches
+
+    def _raw_predecessor(self, db, job):
+        """Find an earlier outstanding batch in any of this job's sessions."""
+        if job['stage'] != 'raw':
+            return None
+        groups = self._raw_groups(db, job['inputs'])
+        for row in db.execute(
+                "SELECT id,inputs FROM jobs WHERE project=? AND stage='raw' AND state!='done' "
+                "AND id!=? AND id IN (SELECT job FROM job_execution)", (job['project'], job['id'])):
+            other = self._raw_groups(db, json.loads(row['inputs']))
+            if any(min(other[key]) <= min(groups[key]) for key in groups.keys() & other.keys()):
+                return row['id']
+        return None
+
+    def _job_ready(self, db, job):
+        if self._raw_predecessor(db, job):
+            return False
+        if job['stage'] == 'raw' and db.execute(
+                "SELECT 1 FROM trace_records r JOIN trace_turns t ON t.id=r.turn_id "
+                "WHERE r.id IN (SELECT value FROM json_each(?)) AND t.ended=0 "
+                "AND t.turn_key!='unassigned'", (dumps(job['inputs']),)).fetchone():
+            return False
+        return self._automatic_job_ready(db, job)
+
     def _enqueue_raw(self, db, project, inputs):
         groups = self._raw_groups(db, inputs)
         if self._busy_raw_sessions(db, project).intersection(groups):
             raise ValueError('选中会话已有等待、执行中或失败的批次，请在执行记录中处理该会话的现有批次')
-        return [self._enqueue(db, project, 'raw', None, records) for records in groups.values()]
+        batches = self._raw_batches(db, inputs)
+        if not batches:
+            raise ValueError('没有可分析的完整轮次，请等待轮次结束')
+        return [self._enqueue(db, project, 'raw', None, records) for records in batches]
 
     def enqueue(self, project: str, stage: str, inputs: list[int] | None = None, skill: str | None = None) -> dict:
         if stage not in {"raw", "skill"}:
@@ -372,16 +439,8 @@ class Runtime:
             if job["state"] in {"done", "failed"}:
                 return
             with self.store.transaction() as db:
-                if not self._automatic_job_ready(db, job):
+                if not self._job_ready(db, job):
                     return False
-                if job['stage'] == 'raw' and job['state'] == 'queued' and db.execute(
-                        'SELECT 1 FROM automatic_jobs WHERE job=?', (job_id,)).fetchone():
-                    sessions = self._raw_groups(db, job['inputs'])
-                    pending = self._raw_groups(db, self._raw_inputs(db, job['project'], automatic=True))
-                    inputs = [record for session in sessions for record in pending.get(session, [])]
-                    if not inputs:
-                        return False
-                    db.execute('UPDATE jobs SET inputs=?,context=NULL WHERE id=?', (dumps(inputs), job_id))
             job = self.store.job(job_id)
             self.store.job_event(job_id, "job.started")
             session = None
@@ -466,7 +525,7 @@ class Runtime:
             for row in jobs:
                 job = self.store.job(row['id'])
                 with self.store.transaction() as db:
-                    if self._automatic_job_ready(db, job):
+                    if self._job_ready(db, job):
                         ready = row['id']
                         break
             if ready is None:
@@ -476,15 +535,20 @@ class Runtime:
             count += 1
 
     def run_manually(self, job_id: str):
+        job = self.store.job(job_id)
         with self.store.transaction() as db:
             row = db.execute('SELECT state FROM jobs WHERE id=?', (job_id,)).fetchone()
             if not row or row['state'] != 'queued':
                 raise ValueError('请选择等待执行的批次')
+            predecessor = self._raw_predecessor(db, job)
+            if predecessor:
+                raise ValueError(f'请先完成同一会话的前序批次：{predecessor}')
             db.execute('DELETE FROM automatic_jobs WHERE job=?', (job_id,))
             Store.event(db, 'job.manual', job_id=job_id)
         return {'job_id': job_id, 'state': 'queued'}
 
     def retry(self, job_id: str, regenerate: bool = False) -> dict:
+        job_ids = [job_id]
         with file_lock(self.config.root / "locks" / "worker.lock", blocking=False):
             job = self.store.job(job_id)
             saved = self.store.rows("SELECT settings FROM job_execution WHERE job=?", (job_id,))
@@ -506,6 +570,18 @@ class Runtime:
                         raise ValueError("A retained publication must be recovered before regenerating")
                 with self.store.transaction() as db:
                     if regenerate:
+                        if job['stage'] == 'raw':
+                            batches = self._raw_batches(db, job['inputs'])
+                            if not batches:
+                                raise ValueError('没有可重新生成的完整轮次')
+                            selected = set(job['inputs'])
+                            if set(record for batch in batches for record in batch) != selected:
+                                raise ValueError('原批次轮次尚未完整或记录已变化，请等待完整采集后处理')
+                            db.execute('UPDATE jobs SET inputs=? WHERE id=?', (dumps(batches[0]), job_id))
+                            job_ids.extend(self._enqueue(db, job['project'], 'raw', None, batch)
+                                           for batch in batches[1:])
+                            Store.event(db, 'job.rebatched', project=job['project'], job_id=job_id,
+                                        original_inputs=job['inputs'], job_ids=job_ids)
                         settings = {k: getattr(self.config, k) for k in ("executor", "api_provider", "api_url", "api_model", "model", "ollama_model")}
                         db.execute("INSERT OR REPLACE INTO job_execution VALUES(?,?)", (job_id, dumps(settings)))
                         db.execute('UPDATE jobs SET context=NULL,result=NULL,thread_id=NULL WHERE id=?', (job_id,))
@@ -515,7 +591,7 @@ class Runtime:
                                 skill=job['skill'], regenerate=regenerate)
             else:
                 raise ValueError("Job is already pending or running")
-        return {"job_id": job_id, "state": self.store.job(job_id)["state"]}
+        return {"job_id": job_id, "job_ids": job_ids, "state": self.store.job(job_id)["state"]}
 
     def worker(self, once: bool = False):
         try:

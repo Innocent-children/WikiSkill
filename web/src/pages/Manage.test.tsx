@@ -18,6 +18,7 @@ it("saves execution settings and clears typed secrets after success", async () =
     capture_mode: "manual",
     analysis_interval_minutes: 60,
     session_wait_minutes: 60,
+    max_turns_per_batch: 1,
     automatic_scan_since: "2026-01-01T00:00:00Z",
 
 
@@ -51,6 +52,9 @@ it("saves execution settings and clears typed secrets after success", async () =
   vi.stubGlobal("fetch", fetcher);
   render(<Settings />);
   const executor = await screen.findByLabelText("执行方式");
+  const turns = screen.getByLabelText("每批最大轮次数") as HTMLInputElement;
+  expect(turns.value).toBe("1");
+  fireEvent.change(turns, { target: { value: "3" } });
   expect(screen.queryByLabelText(/API key/)).toBeNull();
   fireEvent.change(executor, { target: { value: "api" } });
   const key = await screen.findByLabelText(/API key/);
@@ -72,6 +76,7 @@ it("saves execution settings and clears typed secrets after success", async () =
     api_key: "test-key",
     capture_mode: "automatic",
     session_wait_minutes: 15,
+    max_turns_per_batch: 3,
     analysis_interval_minutes: 60,
   });
   expect(JSON.parse(write[1].body as string)).not.toHaveProperty(
@@ -79,13 +84,34 @@ it("saves execution settings and clears typed secrets after success", async () =
   );
   await waitFor(() => expect((key as HTMLInputElement).value).toBe(""));
   expect(wait.value).toBe("15");
+  expect(turns.value).toBe("3");
+});
+
+it("validates the batch turn limit and retains edits when saving fails", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, options?: RequestInit) =>
+    options?.method === "PUT"
+      ? Response.json({ detail: "max_turns_per_batch must be a positive integer" }, { status: 409 })
+      : Response.json({ capture_mode: "manual", max_turns_per_batch: 1,
+          automatic_scan_since: "2026-01-01T00:00:00Z", executor: "codex", codex_command: ["codex", "app-server"] }),
+  ));
+  render(<Settings />);
+  const turns = await screen.findByLabelText("每批最大轮次数") as HTMLInputElement;
+  for (const value of ["0", "-1", "1.5", ""]) {
+    fireEvent.change(turns, { target: { value } });
+    expect(turns.checkValidity()).toBe(false);
+  }
+  fireEvent.change(turns, { target: { value: "4" } });
+  expect(turns.checkValidity()).toBe(true);
+  fireEvent.submit(turns.closest("form")!);
+  await screen.findByText("max_turns_per_batch must be a positive integer");
+  expect(turns.value).toBe("4");
 });
 
 it("validates session wait input and displays a rejected save without losing edits", async () => {
   vi.stubGlobal("fetch", vi.fn(async (_url: string, options?: RequestInit) =>
     options?.method === "PUT"
       ? Response.json({ detail: "session_wait_minutes must be a positive integer" }, { status: 400 })
-      : Response.json({ capture_mode: "automatic", session_wait_minutes: 60,
+      : Response.json({ capture_mode: "automatic", session_wait_minutes: 60, max_turns_per_batch: 1,
           analysis_interval_minutes: 60, automatic_scan_since: "2026-01-01T00:00:00Z",
           executor: "codex", codex_command: ["codex", "app-server"] }),
   ));

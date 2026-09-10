@@ -22,6 +22,21 @@ from test_live_runtime import FakeSession, OBSERVATION, seed_record
 
 
 class SessionWaitSettingsWebTests(unittest.TestCase):
+    def test_turn_batch_setting_roundtrip_and_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            Runtime(Config(root, auto_start=False))
+            with TestClient(create_app(root), base_url="http://127.0.0.1") as client:
+                self.assertEqual(client.get('/api/settings').json()['max_turns_per_batch'], 1)
+                self.assertEqual(client.put('/api/settings', json={'max_turns_per_batch': 3}).status_code, 200)
+                self.assertEqual(client.get('/api/settings').json()['max_turns_per_batch'], 3)
+                for invalid in (0, -1, 1.5, True, '2', None):
+                    with self.subTest(invalid=invalid):
+                        response = client.put('/api/settings', json={'max_turns_per_batch': invalid})
+                        self.assertEqual(response.status_code, 409)
+                        self.assertIn('max_turns_per_batch', response.json()['detail'])
+                        self.assertEqual(Config.load(root).max_turns_per_batch, 3)
+
     def test_session_wait_settings_api_roundtrip_and_validation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -38,6 +38,7 @@ class Config:
     automatic_scan_since: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"))
     analysis_interval_minutes: int = 60
     session_wait_minutes: int = 60
+    max_turns_per_batch: int = 1
     ollama_model: str = ""
     codex_home: str = field(default_factory=lambda: os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
     install_directory: str = field(default_factory=lambda: str(Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "skills"))
@@ -61,7 +62,7 @@ class Config:
             object.__setattr__(self, "automatic_scan_since", since.astimezone(timezone.utc).isoformat())
         except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError("自动扫描起始时间必须是包含时区的有效日期时间") from exc
-        for key in ("analysis_interval_minutes", "session_wait_minutes", "timeout_seconds", "poll_seconds"):
+        for key in ("analysis_interval_minutes", "session_wait_minutes", "max_turns_per_batch", "timeout_seconds", "poll_seconds"):
             if type(getattr(self, key)) is not int or getattr(self, key) < 1:
                 raise ValueError(f"{key} must be a positive integer")
         for key in ("auto_start",):

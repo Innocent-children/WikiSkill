@@ -46,6 +46,7 @@ export type Config = {
   automatic_scan_since: string;
   analysis_interval_minutes: number;
   session_wait_minutes: number;
+  max_turns_per_batch: number;
   ollama_model: string;
   codex_home: string;
   install_directory: string;
