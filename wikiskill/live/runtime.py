@@ -151,14 +151,15 @@ class Runtime:
         return inputs
 
     def _automatic_session_ready(self, db, session, now):
-        """Wait for a full hour of session inactivity before automatic analysis."""
+        """Check session inactivity against the configured automatic analysis wait."""
+        cutoff = now - self.config.session_wait_minutes * 60
         column = 's.session' if session[0] == 'session' else 's.identity'
         rows = db.execute(
             "SELECT max(r.created) latest, "
             "max(CASE WHEN t.ended=0 AND t.turn_key!='unassigned' THEN 1 ELSE 0 END) unfinished "
             "FROM trace_sources s JOIN trace_records r ON r.source=s.id "
             "JOIN trace_turns t ON t.id=r.turn_id WHERE " + column + "=?", (session[1],)).fetchone()
-        if rows['latest'] is None or rows['latest'] > now - 3600 or rows['unfinished']:
+        if rows['latest'] is None or rows['latest'] > cutoff or rows['unfinished']:
             return False
         sources = db.execute(
             "SELECT s.path,s.position FROM trace_sources s WHERE " + column + "=? "
@@ -170,7 +171,7 @@ class Runtime:
             except OSError:
                 return False
             # File activity also covers records the collector has yet to ingest.
-            if stat.st_mtime > now - 3600 or stat.st_size != source['position']:
+            if stat.st_mtime > cutoff or stat.st_size != source['position']:
                 return False
         return True
 

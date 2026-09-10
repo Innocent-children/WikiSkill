@@ -21,6 +21,23 @@ from wikiskill.live.web import create_app
 from test_live_runtime import FakeSession, OBSERVATION, seed_record
 
 
+class SessionWaitSettingsWebTests(unittest.TestCase):
+    def test_session_wait_settings_api_roundtrip_and_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            Runtime(Config(root, auto_start=False))
+            with TestClient(create_app(root), base_url="http://127.0.0.1") as client:
+                self.assertEqual(client.get('/api/settings').json()['session_wait_minutes'], 60)
+                response = client.put('/api/settings', json={'session_wait_minutes': 20})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()['session_wait_minutes'], 20)
+                self.assertEqual(client.get('/api/settings').json()['session_wait_minutes'], 20)
+                response = client.put('/api/settings', json={'session_wait_minutes': 0})
+                self.assertEqual(response.status_code, 409)
+                self.assertIn('session_wait_minutes', response.json()['detail'])
+                self.assertEqual(Config.load(root).session_wait_minutes, 20)
+
+
 class LiveWebTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

@@ -92,6 +92,8 @@ it("selects full automatic mode and local Ollama with an explicit interval", asy
   const config = {
     capture_mode: "manual",
     analysis_interval_minutes: 60,
+    session_wait_minutes: 60,
+    automatic_scan_since: "2026-01-01T00:00:00Z",
 
 
     executor: "codex",

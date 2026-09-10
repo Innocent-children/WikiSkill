@@ -17,6 +17,8 @@ it("saves execution settings and clears typed secrets after success", async () =
   const config = {
     capture_mode: "manual",
     analysis_interval_minutes: 60,
+    session_wait_minutes: 60,
+    automatic_scan_since: "2026-01-01T00:00:00Z",
 
 
     ollama_model: "",
@@ -57,6 +59,9 @@ it("saves execution settings and clears typed secrets after success", async () =
   fireEvent.change(screen.getByLabelText("分析模式"), {
     target: { value: "automatic" },
   });
+  const wait = screen.getByLabelText("会话等待时长（分钟）") as HTMLInputElement;
+  expect(wait.value).toBe("60");
+  fireEvent.change(wait, { target: { value: "15" } });
   fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
   await screen.findByText("设置已保存");
   const calls = fetcher.mock.calls as unknown as Array<[string, RequestInit]>;
@@ -66,11 +71,36 @@ it("saves execution settings and clears typed secrets after success", async () =
 
     api_key: "test-key",
     capture_mode: "automatic",
+    session_wait_minutes: 15,
+    analysis_interval_minutes: 60,
   });
   expect(JSON.parse(write[1].body as string)).not.toHaveProperty(
     "api_key_configured",
   );
   await waitFor(() => expect((key as HTMLInputElement).value).toBe(""));
+  expect(wait.value).toBe("15");
+});
+
+it("validates session wait input and displays a rejected save without losing edits", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, options?: RequestInit) =>
+    options?.method === "PUT"
+      ? Response.json({ detail: "session_wait_minutes must be a positive integer" }, { status: 400 })
+      : Response.json({ capture_mode: "automatic", session_wait_minutes: 60,
+          analysis_interval_minutes: 60, automatic_scan_since: "2026-01-01T00:00:00Z",
+          executor: "codex", codex_command: ["codex", "app-server"] }),
+  ));
+  render(<Settings />);
+  const wait = await screen.findByLabelText("会话等待时长（分钟）") as HTMLInputElement;
+  for (const value of ["0", "-1", "1.5", ""]) {
+    fireEvent.change(wait, { target: { value } });
+    expect(wait.checkValidity()).toBe(false);
+  }
+  fireEvent.change(wait, { target: { value: "15" } });
+  expect(wait.checkValidity()).toBe(true);
+  fireEvent.submit(wait.closest("form")!);
+  await screen.findByText("session_wait_minutes must be a positive integer");
+  expect(wait.value).toBe("15");
+  expect(screen.queryByText("设置已保存")).toBeNull();
 });
 
 const queue = {

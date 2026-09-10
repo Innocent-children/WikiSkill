@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import tempfile
 import unittest
 from dataclasses import replace
@@ -18,6 +19,111 @@ from wikiskill.live.web import create_app
 from wikiskill.live.skills import snapshot, skill_text
 from test_live_runtime import FakeSession, seed_record
 from test_live_capture import transcript
+
+
+class SessionWaitTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.project = self.root / 'project'
+        self.project.mkdir()
+        self.runtime = Runtime(Config(self.root / 'data', capture_mode='automatic',
+                                      session_wait_minutes=15, auto_start=False), FakeSession)
+        self.key = self.runtime.store.project(str(self.project))
+        seed_record(self.runtime, self.key)
+        self.source = self.root / 'session.jsonl'
+        self.source.write_bytes(b'{}\n')
+        self.now = 2_000_000_000
+        self.clock = patch('wikiskill.live.runtime.time.time', return_value=self.now)
+        self.clock.start()
+        self.addCleanup(self.clock.stop)
+        with self.runtime.store.transaction() as db:
+            db.execute('UPDATE trace_sources SET path=?,position=?', (str(self.source), self.source.stat().st_size))
+        self.age(900)
+        FakeSession.starts, FakeSession.generations, FakeSession.reports = [], [], []
+        FakeSession.fail_generate = FakeSession.fail_report = False
+        FakeSession.no_change = True
+        FakeSession.during_generate = None
+        self.addCleanup(setattr, FakeSession, 'no_change', False)
+
+    def age(self, seconds):
+        with self.runtime.store.transaction() as db:
+            db.execute('UPDATE trace_records SET created=?', (self.now - seconds,))
+        os.utime(self.source, (self.now - seconds, self.now - seconds))
+
+    def ready(self):
+        with self.runtime.store.transaction() as db:
+            return self.runtime._automatic_session_ready(db, ('identity', 'fixture'), self.now)
+
+    def test_wait_uses_configured_minutes_and_inclusive_cutoff(self):
+        for minutes in (1, 15, 60, 120):
+            with self.subTest(minutes=minutes):
+                self.runtime.config = replace(self.runtime.config, session_wait_minutes=minutes)
+                self.age(minutes * 60 - 1)
+                self.assertFalse(self.ready())
+                self.age(minutes * 60)
+                self.assertTrue(self.ready())
+                self.age(minutes * 60 + 1)
+                self.assertTrue(self.ready())
+
+    def test_recent_ingestion_file_activity_and_unfinished_turns_delay_analysis(self):
+        self.age(900)
+        with self.runtime.store.transaction() as db:
+            db.execute('UPDATE trace_records SET created=?,original=?',
+                       (self.now, b'{"timestamp":"2000-01-01T00:00:00Z"}'))
+        self.assertFalse(self.ready())
+        self.age(900)
+        os.utime(self.source, (self.now, self.now))
+        self.assertFalse(self.ready())
+        self.age(900)
+        self.source.write_bytes(b'{}\n{}\n')
+        os.utime(self.source, (self.now - 900, self.now - 900))
+        self.assertFalse(self.ready())
+        with self.runtime.store.transaction() as db:
+            db.execute('UPDATE trace_sources SET position=?', (self.source.stat().st_size,))
+            db.execute('UPDATE trace_turns SET ended=0')
+        self.assertFalse(self.ready())
+        with self.runtime.store.transaction() as db:
+            db.execute('UPDATE trace_turns SET ended=1')
+        self.assertTrue(self.ready())
+
+    def test_new_record_delays_queued_job_and_explicit_run_bypasses_wait(self):
+        job_id = self.runtime.schedule()[0]
+        seed_record(self.runtime, self.key, 'new')
+        self.assertFalse(self.runtime.run_job(job_id))
+        self.assertEqual(self.runtime.store.job(job_id)['state'], 'queued')
+        self.assertEqual(FakeSession.generations, [])
+        self.runtime.run_manually(job_id)
+        self.runtime.run_job(job_id)
+        self.assertEqual(self.runtime.store.job(job_id)['state'], 'done')
+
+    def test_saved_wait_is_loaded_by_worker_for_queue_and_execution(self):
+        from wikiskill.live.settings import save_settings
+        root = self.runtime.config.root
+        save_settings(root, {'session_wait_minutes': 120})
+        self.runtime.worker(once=True)
+        self.assertEqual(self.runtime.store.rows('SELECT id FROM jobs'), [])
+        save_settings(root, {'session_wait_minutes': 15})
+        job_id = self.runtime.schedule()[0]
+        save_settings(root, {'session_wait_minutes': 120})
+        self.runtime.worker(once=True)
+        self.assertEqual(self.runtime.store.job(job_id)['state'], 'queued')
+        save_settings(root, {'session_wait_minutes': 15})
+        self.runtime.worker(once=True)
+        self.assertEqual(self.runtime.store.job(job_id)['state'], 'done')
+
+    def test_analysis_interval_still_limits_new_batches(self):
+        self.runtime.schedule()
+        with self.runtime.store.transaction() as db:
+            db.execute("UPDATE jobs SET state='done'")
+            db.execute("UPDATE trace_records SET consumed_by='previous'")
+        seed_record(self.runtime, self.key, 'next')
+        self.age(900)
+        self.assertEqual(self.runtime.schedule(), [])
+        with self.runtime.store.transaction() as db:
+            db.execute('UPDATE automatic_analysis SET last_run=?', (self.now - 3600,))
+        self.assertEqual(len(self.runtime.schedule()), 1)
 
 
 class EvolutionTests(unittest.TestCase):

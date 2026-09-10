@@ -52,6 +52,19 @@ class LiveStoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 save_settings(self.runtime.config.root, change)
 
+    def test_session_wait_settings_validate_and_roundtrip(self):
+        root = self.runtime.config.root
+        self.assertEqual(Config.load(root).session_wait_minutes, 60)
+        for minutes in (1, 15, 120):
+            saved = save_settings(root, {"session_wait_minutes": minutes})
+            self.assertEqual(saved["session_wait_minutes"], minutes)
+            self.assertEqual(Config.load(root).session_wait_minutes, minutes)
+        before = (root / "config.json").read_bytes()
+        for value in (0, -1, 1.5, True, "30", None):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "session_wait_minutes"):
+                save_settings(root, {"session_wait_minutes": value})
+            self.assertEqual((root / "config.json").read_bytes(), before)
+
     def test_old_summary_rows_survive_initialization(self):
         with self.runtime.store.transaction() as db:
             db.execute("INSERT INTO raw VALUES('old',?,'source','{\"observations\":[]}',1)", (self.key,))

@@ -214,9 +214,20 @@ function SettingsForm({ initial }: { initial: Config }) {
               符合条件的会话保留完整原文；已采集内容按原进度继续。手动导入历史不受限制。
             </p>
             <p className="muted small">
-              自动分析需等待同一会话连续 1 小时没有新增记录，且所有可识别轮次均已结束。
+              会话等待时长从最近入库记录计算，同时检查源文件静默、内容已采集完毕，且所有可识别轮次均已结束。
               等待执行期间出现新记录会重新计时；手动执行可立即开始。
             </p>
+            <label>
+              会话等待时长（分钟）
+              <input
+                type="number"
+                min={1}
+                step={1}
+                required
+                value={values.session_wait_minutes}
+                onChange={(e) => setValues({ ...values, session_wait_minutes: Number(e.target.value) })}
+              />
+            </label>
             {text("analysis_interval_minutes", "自动分析间隔（分钟）", "number")}
           </>
         )}

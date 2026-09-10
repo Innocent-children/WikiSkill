@@ -45,6 +45,7 @@ export type Config = {
   capture_mode: string;
   automatic_scan_since: string;
   analysis_interval_minutes: number;
+  session_wait_minutes: number;
   ollama_model: string;
   codex_home: string;
   install_directory: string;
