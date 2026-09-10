@@ -13,8 +13,8 @@ for Skill Evolution**, arXiv:2608.27454v1, 2026.
   https://creativecommons.org/licenses/by/4.0/
 
 Prompt hashes and source sections are recorded in `wikiskill/live/prompts/sources.json`.
-Project-authored integration additions are documented in `prompts/ADAPTATIONS.md`
-and implemented in `generation.py`; they are appended separately from the original prompts.
+Project-authored integration additions are documented in [ADAPTATIONS.md](wikiskill/live/prompts/ADAPTATIONS.md)
+and implemented in `wikiskill/live/generation.py`; they are appended separately from the original prompts.
 
 The benchmark implementations, vendored scorers and experiment commands remain
 excluded from this distribution. This project does not claim to reproduce the
